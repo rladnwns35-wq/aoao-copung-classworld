@@ -257,12 +257,12 @@ select.fi{appearance:none;background-image:url("data:image/svg+xml,%3Csvg width=
 
 .cnt-full{flex:1;overflow:hidden;display:flex;flex-direction:column;min-width:0;height:100%;min-height:0;}
 .cnt-full #cnt{flex:1;padding:28px 32px;overflow-y:auto;max-width:1200px;margin:0 auto;width:100%;min-height:0;scrollbar-gutter:stable;}
-.cnt-full #cnt:has(.page-full.on),.cnt-full #cnt:has(#pg-quests.on){padding:0!important;max-width:none!important;overflow:hidden!important;display:flex!important;flex-direction:column!important;height:100%!important;}
 .page{display:none;overflow-y:auto;}
 .page.on{padding:28px 32px;}
 .page.on{display:block;}
 .page-full{display:none;flex-direction:column;}
 .page-full.on{display:flex;height:100%;}
+#pg-quests.on{display:flex;flex-direction:column;height:100%;padding:0!important;overflow:hidden!important;}
 @keyframes pgIn{from{opacity:0}to{opacity:1}}
 
 /* ── PAGE HEADER ── */
@@ -889,7 +889,7 @@ hr.div{border:none;border-top:1px solid #f1f5f9;margin:16px 0;}
       </div>
 
       <!-- ══ QUESTS ════════════════════════════════ -->
-      <div class="page" id="pg-quests" style="padding:0!important;overflow:hidden!important;position:relative;">
+      <div class="page" id="pg-quests" style="padding:0!important;overflow:hidden!important;position:relative;flex-direction:column;height:100%;">
         <div style="display:grid;grid-template-columns:320px 1fr 280px;height:100%;overflow:hidden;background:#f8faff;">
           <!-- 좌측: 퀘스트 목록 -->
           <div style="border-right:1.5px solid #eef2f8;display:flex;flex-direction:column;overflow:hidden;background:#fff;height:100%;padding-bottom:16px;">
@@ -899,10 +899,10 @@ hr.div{border:none;border-top:1px solid #f1f5f9;margin:16px 0;}
                 퀘스트
               </div>
               <div style="display:flex;gap:4px;flex-wrap:wrap" id="qf-wrap">
-                <button class="btn btn-p btn-xs" onclick="qf('all',this)">전체</button>
-                <button class="btn btn-g btn-xs" onclick="qf('active',this)">진행중</button>
-                <button class="btn btn-g btn-xs" onclick="qf('done',this)">완료</button>
-                <button class="btn btn-g btn-xs" onclick="qf('pending',this)">대기</button>
+                <button class="btn btn-p btn-xs" onclick="qf('all',this);return false;">전체</button>
+                <button class="btn btn-g btn-xs" onclick="qf('active',this);return false;">진행중</button>
+                <button class="btn btn-g btn-xs" onclick="qf('done',this);return false;">완료</button>
+                <button class="btn btn-g btn-xs" onclick="qf('pending',this);return false;">대기</button>
               </div>
             </div>
             <div style="flex:1;overflow-y:auto;padding:10px" id="quests-list-sidebar"></div>
@@ -1891,6 +1891,21 @@ function guestLogin(type){
       if(CP.equippedBanner===undefined)CP.equippedBanner=null;
       if(!CP.bio)CP.bio='';
       if(!CP.account_number)CP.account_number=genAcc();
+      // 플러그인 데이터 복원 (Supabase → 로컬)
+      if(Array.isArray(CP.user_plugins)&&CP.user_plugins.length){
+        userPlugins=CP.user_plugins;
+        try{localStorage.setItem('cw_user_plugins',JSON.stringify(userPlugins));}catch(_){}
+      }
+      if(Array.isArray(CP.installed_plugins)&&CP.installed_plugins.length){
+        installedSet=new Set(CP.installed_plugins);
+        try{localStorage.setItem('cw_installed',JSON.stringify([...installedSet]));}catch(_){}
+      }
+      // plugin_data 복원 (플러그인 런타임 저장 데이터)
+      if(CP.plugin_data&&typeof CP.plugin_data==='object'){
+        Object.entries(CP.plugin_data).forEach(([k,v])=>{
+          try{localStorage.setItem('plg_'+k,JSON.stringify(v));}catch(_){}
+        });
+      }
     } else if(!error || error.code === 'PGRST116') {
       // profile 없음 → 자동 생성 (트리거 없는 경우 대비)
       const meta=CU.user_metadata||{};
@@ -2047,10 +2062,10 @@ function initRealtimeSubscriptions(){
   // 4. 채팅 메시지 실시간
   if(CP.class_id){
     const msgCh=SB.channel('chat_'+CP.class_id)
-      .on('postgres_changes',{event:'INSERT',schema:'public',table:'messages',filter:'class_id=eq.'+CP.class_id},(payload)=>{
+      .on('postgres_changes',{event:'INSERT',schema:'public',table:'channel_messages',filter:'class_id=eq.'+CP.class_id},(payload)=>{
         const d=payload.new;
-        if(!d||d.author_id===CU.id)return; // 내 메시지는 이미 표시됨
-        const chId=d.channel||'general';
+        if(!d||d.author_id===CU?.id)return; // 내 메시지는 이미 표시됨
+        const chId=d.channel_id||'general';
         if(!DSC_MSGS[chId])DSC_MSGS[chId]=[];
         const rtCol=`hsl(${(d.author_name||'').split('').reduce((a,c)=>a+c.charCodeAt(0),0)%360},55%,45%)`;
         const rtMsg={id:d.id||Date.now(),nm:d.author_name||'학생',uid:d.author_id,col:rtCol,
@@ -2127,7 +2142,7 @@ function showApp(){
       window._niceOfficeCode=CP.office_code;
       window._niceSchoolCode=CP.school_code;
       // localStorage도 최신으로 동기화
-      localStorage.setItem('cw_school',JSON.stringify({officeCode:CP._officeCode,schoolCode:CP._schoolCode,schoolName:CP.school||''}));
+      localStorage.setItem('cw_school',JSON.stringify({officeCode:CP.office_code,schoolCode:CP.school_code,schoolName:CP.school||''}));
     } else {
       // Supabase에 없으면 localStorage에서 복원
       const sc=(()=>{try{return JSON.parse(localStorage.getItem('cw_school')||'null');}catch(_){return null;}})();
@@ -2168,6 +2183,18 @@ function showApp(){
       if(s.schedEvents&&Array.isArray(s.schedEvents)){
         const neis=schedEvents.filter(e=>e.neis);
         schedEvents=[...s.schedEvents.filter(e=>!e.neis),...neis];
+      }
+      // 시간 제한 복원
+      if(s.timeRestrict){
+        window._savedTimeRestrict=s.timeRestrict;
+      }
+      // 수업 메시지 복원
+      if(s.classMsg){
+        window._savedClassMsg=s.classMsg;
+      }
+      // 공동구매 데이터 복원
+      if(s.groupBuyData&&typeof s.groupBuyData==='object'){
+        groupBuyData=s.groupBuyData;
       }
     }).catch(()=>{});
   }
@@ -2340,15 +2367,42 @@ function goPage(id){
   // board-area 비우기 (다른 페이지 이동 시 잔재 제거)
   if(!isBoard){const ba=document.getElementById('board-area');if(ba)ba.innerHTML='';}
   if(cnt){
-    cnt.style.display=isBoard?'none':'block';
-    if(isFullPage){cnt.style.padding='0';cnt.style.maxWidth='100%';}
-    else{cnt.style.padding='';cnt.style.maxWidth='';}
+    if(isBoard){
+      cnt.style.display='none';
+    } else if(isFullPage){
+      cnt.style.display='flex';
+      cnt.style.flexDirection='column';
+      cnt.style.padding='0';
+      cnt.style.maxWidth='100%';
+      cnt.style.overflow='hidden';
+      cnt.style.height='100%';
+    } else {
+      cnt.style.display='block';
+      cnt.style.flexDirection='';
+      cnt.style.padding='';
+      cnt.style.maxWidth='';
+      cnt.style.overflow='';
+      cnt.style.height='';
+    }
   }
   if(board)board.style.display=isBoard?'flex':'none';
   // 일반 페이지 전환
   if(!isBoard){
-    document.querySelectorAll('.page').forEach(p=>p.classList.remove('on'));
-    const pg=document.getElementById(id);if(pg)pg.classList.add('on');
+    document.querySelectorAll('.page').forEach(p=>{
+      p.classList.remove('on');
+      p.style.height='';
+      p.style.display='';
+    });
+    const pg=document.getElementById(id);
+    if(pg){
+      pg.classList.add('on');
+      if(isFullPage){
+        pg.style.display='flex';
+        pg.style.flexDirection='column';
+        pg.style.height='100%';
+        pg.style.flex='1';
+      }
+    }
   }
   // nav/sidebar 활성
   document.querySelectorAll('.nl').forEach(b=>b.classList.toggle('on',b.getAttribute('onclick')?.includes(id)));
@@ -2356,7 +2410,7 @@ function goPage(id){
   const loaders={
     'pg-econ':loadEcon,'pg-shop':loadShop,'pg-quests':loadQuests,
     'pg-jobs':loadJobs,'pg-credit':loadCredit,'pg-admin':()=>admTab('students',null),
-    'pg-dev':()=>devTab('users',null),'pg-comm':loadComm,'pg-board':loadBoard,
+    'pg-dev':()=>devTab('stats',null),'pg-comm':loadComm,'pg-board':loadBoard,
     'pg-rank':loadRanking,'pg-meal':loadMeal,'pg-schedule':loadSchedule,
   };
   loaders[id]?.();
@@ -2452,16 +2506,76 @@ async function loadDash(){
       <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1.5 2h2l2 5.5h5l1.5-4H4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="5" cy="10" r="1" fill="currentColor"/><circle cx="9" cy="10" r="1" fill="currentColor"/></svg>
       상점
     </button>`:'';
-  renderFeed();renderNotices();
+  renderFeed();
+  // Supabase에서 공지 로드
+  if(SB&&CP?.class_id&&CP?.id!=='demo'&&!CP?._isGuest){
+    SB.from('notices')
+      .select('id,title,content,created_at')
+      .eq('class_id',CP.class_id)
+      .order('created_at',{ascending:false})
+      .limit(10)
+      .then(({data})=>{
+        if(data&&data.length){
+          window._notices=data.map(n=>({
+            id:n.id,t:n.title||'',b:n.content||'',
+            d:new Date(n.created_at).toLocaleDateString('ko-KR',{month:'2-digit',day:'2-digit'}),
+            lvl:'normal'
+          }));
+        }
+        renderNotices();
+      }).catch(()=>renderNotices());
+    // 학생: 완료 퀘스트 수 로드
+    if(CP.role==='student'){
+      SB.from('quest_completions')
+        .select('id',{count:'exact',head:true})
+        .eq('user_id',CU.id)
+        .eq('status','approved')
+        .then(({count})=>{
+          const el=document.querySelector('#dash-stats .stat:nth-child(4) .stat-v');
+          // 완료 퀘스트 stat은 4번째 stat (학생용)
+          const statEls=document.querySelectorAll('#dash-stats .stat');
+          statEls.forEach(s=>{if(s.querySelector('.stat-l')?.textContent?.includes('완료 퀘스트')){s.querySelector('.stat-v').textContent=count||0;}});
+        }).catch(()=>{});
+    }
+  } else {
+    renderNotices();
+  }
 }
 function renderFeed(){
-  const rows=[
+  const el=document.getElementById('feed');
+  if(!el)return;
+  // 더미 row (fallback)
+  const dummyRows=[
     {bg:'var(--blue6)',ico:'<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5.5" stroke="#1d4ed8" stroke-width="1.3"/><path d="M4 6.5l2 2 3.5-4" stroke="#1d4ed8" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',t:'<b>퀘스트 완료</b> 수학 숙제 제출 → <span style="color:var(--green);font-weight:700;">+200 CC</span>',ts:'방금 전'},
     {bg:'var(--gbg)',ico:'<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M1.5 2h2l2 6.5h5l1.5-4H4" stroke="#15803d" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',t:'<b>상점 구매</b> 자유 좌석권 → <span style="color:var(--red);font-weight:700;">-150 CC</span>',ts:'10분 전'},
-    {bg:'var(--abg)',ico:'<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M6.5 1l1.3 2.7 3 .43-2.18 2.12.52 3L6.5 7.8l-2.64 1.45.52-3L2.2 4.13l3-.43z" stroke="#b45309" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/></svg>',t:'<b>신용 등급 상승</b> C → B 등급',ts:'1시간 전'},
-    {bg:'var(--pbg)',ico:'<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M1.5 10l3-4.5 3 2.5 4-6" stroke="#6d28d9" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>',t:'<b>주식 수익</b> APPLE 매도 → <span style="color:var(--green);font-weight:700;">+80 CC</span>',ts:'3시간 전'},
   ];
-  document.getElementById('feed').innerHTML=rows.map(r=>`<div class="feed-row"><div class="feed-ico" style="background:${r.bg}">${r.ico}</div><div class="feed-txt">${r.t}</div><div class="feed-time">${r.ts}</div></div>`).join('');
+  // Supabase에서 최근 활동 로드
+  if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest){
+    SB.from('transactions')
+      .select('id,amount,type,description,created_at')
+      .or(`from_id.eq.${CU.id},to_id.eq.${CU.id}`)
+      .order('created_at',{ascending:false})
+      .limit(8)
+      .then(({data})=>{
+        if(!data||!data.length){el.innerHTML=dummyRows.map(r=>`<div class="feed-row"><div class="feed-ico" style="background:${r.bg}">${r.ico}</div><div class="feed-txt">${r.t}</div><div class="feed-time">${r.ts}</div></div>`).join('');return;}
+        const typeIco={
+          reward:'<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5.5" stroke="#1d4ed8" stroke-width="1.3"/><path d="M4 6.5l2 2 3.5-4" stroke="#1d4ed8" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+          transfer:'<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M1 6.5h11M8 3l3.5 3.5L8 10" stroke="#6d28d9" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+          purchase:'<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M1.5 2h2l2 6.5h5l1.5-4H4" stroke="#15803d" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+          stock:'<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M1.5 10l3-4.5 3 2.5 4-6" stroke="#6d28d9" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+          deduct:'<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M1 6.5h11" stroke="#dc2626" stroke-width="1.4" stroke-linecap="round"/></svg>',
+        };
+        const typeBg={reward:'var(--blue6)',transfer:'var(--pbg)',purchase:'var(--gbg)',stock:'var(--pbg)',deduct:'var(--rbg)'};
+        const typeLabel={reward:'보상 지급',transfer:'코인 이동',purchase:'상점 구매',stock:'주식 거래',deduct:'차감',tax:'세금'};
+        el.innerHTML=data.map(tx=>{
+          const isIncome=tx.amount>0;
+          const relTime=(()=>{const d=new Date(tx.created_at);const n=new Date();const s=Math.round((n-d)/1000);if(s<60)return '방금 전';if(s<3600)return Math.round(s/60)+'분 전';if(s<86400)return Math.round(s/3600)+'시간 전';return Math.round(s/86400)+'일 전';})();
+          return `<div class="feed-row"><div class="feed-ico" style="background:${typeBg[tx.type]||'var(--bg4)'}">${typeIco[tx.type]||typeIco.reward}</div><div class="feed-txt"><b>${typeLabel[tx.type]||tx.type}</b> ${escHtml(tx.description||'')} → <span style="color:${isIncome?'var(--green)':'var(--red)'};font-weight:700;">${isIncome?'+':''}${(tx.amount||0).toLocaleString()} CC</span></div><div class="feed-time">${relTime}</div></div>`;
+        }).join('');
+      }).catch(()=>{el.innerHTML=dummyRows.map(r=>`<div class="feed-row"><div class="feed-ico" style="background:${r.bg}">${r.ico}</div><div class="feed-txt">${r.t}</div><div class="feed-time">${r.ts}</div></div>`).join('');});
+  } else {
+    el.innerHTML=dummyRows.map(r=>`<div class="feed-row"><div class="feed-ico" style="background:${r.bg}">${r.ico}</div><div class="feed-txt">${r.t}</div><div class="feed-time">${r.ts}</div></div>`).join('');
+  }
 }
 function renderNotices(){
   const items=window._notices?.length?window._notices.map(n=>({t:n.t,b:n.b,d:n.d,lvl:n.lvl})):[
@@ -2792,14 +2906,53 @@ function renderTaxTab(el){
 
 /* ── 거래내역 탭 ── */
 function renderTxTab(el){
-  el.innerHTML=`<div class="tw">${renderTxRows(50)}</div>`;
+  el.innerHTML=`<div class="tw" id="tx-table-wrap"><div class="empty" style="padding:24px"><div style="width:32px;height:32px;border:3px solid var(--blue5);border-top-color:var(--blue);border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 10px"></div><div class="empty-t" style="font-size:12px">거래내역 불러오는 중...</div></div></div>`;
+  if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest){
+    SB.from('transactions')
+      .select('id,amount,type,description,created_at,from_id,to_id')
+      .or(`from_id.eq.${CU.id},to_id.eq.${CU.id}`)
+      .order('created_at',{ascending:false})
+      .limit(50)
+      .then(({data})=>{
+        const wrap=document.getElementById('tx-table-wrap');
+        if(!wrap)return;
+        if(!data||!data.length){wrap.innerHTML='<div class="empty"><div class="empty-t">거래내역 없음</div></div>';return;}
+        const typeStyle={reward:'#10b981',purchase:'#ef4444',stock:'#8b5cf6',salary:'#f59e0b',transfer:'#3b82f6',deduct:'#ef4444',loan:'#f59e0b',tax:'#8b5cf6'};
+        const typeLabel={reward:'보상',purchase:'구매',stock:'주식',salary:'급여',transfer:'송금',deduct:'차감',loan:'대출',tax:'세금'};
+        const typeIco={
+          reward:`<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6" stroke="#10b981" stroke-width="1.4"/><path d="M4.5 7l2 2 3.5-4" stroke="#10b981" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+          purchase:`<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 2h2l2.5 7.5h5.5l1.5-4.5H4" stroke="#ef4444" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+          stock:`<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1.5 11l3.5-5 3 3 3-5.5" stroke="#8b5cf6" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+          transfer:`<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1.5 7h11M9.5 4l3 3-3 3" stroke="#3b82f6" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+          deduct:`<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 7h10" stroke="#ef4444" stroke-width="1.4" stroke-linecap="round"/></svg>`,
+          loan:`<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="1.5" y="5" width="11" height="8" rx="1.5" stroke="#f59e0b" stroke-width="1.3"/></svg>`,
+          tax:`<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1.5l1.5 3 3.5.5-2.5 2.5.5 3.5L7 9.3l-3 1.7.5-3.5L2 5l3.5-.5z" stroke="#8b5cf6" stroke-width="1.2"/></svg>`,
+        };
+        const relTime=(d)=>{const s=Math.round((Date.now()-new Date(d))/1000);if(s<60)return '방금 전';if(s<3600)return Math.round(s/60)+'분 전';if(s<86400)return Math.round(s/3600)+'시간 전';return new Date(d).toLocaleDateString('ko-KR',{month:'2-digit',day:'2-digit'});};
+        wrap.innerHTML=`<table>
+          <thead><tr><th></th><th>내용</th><th>금액</th><th>날짜</th></tr></thead>
+          <tbody>
+            ${data.map(t=>{const isIncome=t.to_id===CU.id&&t.amount>0||t.type==='reward'||t.type==='salary'||t.type==='loan';const color=t.amount>=0&&(t.to_id===CU.id||t.type==='reward')?'#10b981':'#ef4444';return `<tr>
+              <td style="width:32px"><div style="width:28px;height:28px;border-radius:9px;background:${typeStyle[t.type]||'#94a3b8'}18;display:flex;align-items:center;justify-content:center">${typeIco[t.type]||typeIco.reward}</div></td>
+              <td><div style="font-size:13.5px;font-weight:600;color:#0f172a">${escHtml(t.description||t.type)}</div><div style="font-size:11px;color:#94a3b8;margin-top:1px">${typeLabel[t.type]||t.type}</div></td>
+              <td style="font-weight:800;font-size:14px;color:${color};white-space:nowrap">${t.amount>=0&&t.to_id===CU.id?'+':''}${(t.amount||0).toLocaleString()} CC</td>
+              <td style="font-size:12px;color:#94a3b8;white-space:nowrap">${relTime(t.created_at)}</td>
+            </tr>`;}).join('')}
+          </tbody>
+        </table>`;
+      }).catch(()=>{
+        const wrap=document.getElementById('tx-table-wrap');
+        if(wrap)wrap.innerHTML=`<div class="tw">${renderTxRowsFallback(50)}</div>`;
+      });
+  } else {
+    document.getElementById('tx-table-wrap').innerHTML=renderTxRowsFallback(50);
+  }
 }
-function renderTxRows(limit){
+function renderTxRowsFallback(limit){
   const txs=[
     {ico:'reward',d:'퀘스트 보상',a:+200,t:'오늘 오전 9:00'},
     {ico:'purchase',d:'상점 구매 (자유 좌석권)',a:-150,t:'오늘 오전 10:30'},
     {ico:'stock',d:'AAPL 2주 매도',a:+320,t:'어제 오후 2:15'},
-    {ico:'salary',d:'주급 지급 (반장)',a:+200,t:'어제 오전 9:00'},
     {ico:'transfer',d:'이서연에게 송금',a:-100,t:'2일 전'},
   ].slice(0,limit);
   const typeStyle={reward:'#10b981',purchase:'#ef4444',stock:'#8b5cf6',salary:'#f59e0b',transfer:'#3b82f6'};
@@ -2808,25 +2961,11 @@ function renderTxRows(limit){
     reward:`<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6" stroke="#10b981" stroke-width="1.4"/><path d="M4.5 7l2 2 3.5-4" stroke="#10b981" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
     purchase:`<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 2h2l2.5 7.5h5.5l1.5-4.5H4" stroke="#ef4444" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
     stock:`<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1.5 11l3.5-5 3 3 3-5.5" stroke="#8b5cf6" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
-    salary:`<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1.5l1.4 2.8 3.1.45-2.24 2.18.53 3.07L7 8.46l-2.79 1.47.53-3.07L2.5 4.75l3.1-.45z" stroke="#f59e0b" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
     transfer:`<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1.5 7h11M9.5 4l3 3-3 3" stroke="#3b82f6" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   };
-  return `<table>
-    <thead><tr><th></th><th>내용</th><th>금액</th><th>날짜</th></tr></thead>
-    <tbody>
-      ${txs.map(t=>`<tr>
-        <td style="width:32px">
-          <div style="width:28px;height:28px;border-radius:9px;background:${typeStyle[t.ico]}18;display:flex;align-items:center;justify-content:center">${typeIco[t.ico]}</div>
-        </td>
-        <td>
-          <div style="font-size:13.5px;font-weight:600;color:#0f172a">${t.d}</div>
-          <div style="font-size:11px;color:#94a3b8;margin-top:1px">${typeLabel[t.ico]}</div>
-        </td>
-        <td style="font-weight:800;font-size:14px;color:${t.a>=0?'#10b981':'#ef4444'};white-space:nowrap">${t.a>=0?'+':''}${t.a.toLocaleString()} CC</td>
-        <td style="font-size:12px;color:#94a3b8;white-space:nowrap">${t.t}</td>
-      </tr>`).join('')}
-    </tbody>
-  </table>`;
+  return `<table><thead><tr><th></th><th>내용</th><th>금액</th><th>날짜</th></tr></thead><tbody>
+    ${txs.map(t=>`<tr><td style="width:32px"><div style="width:28px;height:28px;border-radius:9px;background:${typeStyle[t.ico]}18;display:flex;align-items:center;justify-content:center">${typeIco[t.ico]||''}</div></td><td><div style="font-size:13.5px;font-weight:600;color:#0f172a">${t.d}</div><div style="font-size:11px;color:#94a3b8;margin-top:1px">${typeLabel[t.ico]}</div></td><td style="font-weight:800;font-size:14px;color:${t.a>=0?'#10b981':'#ef4444'};white-space:nowrap">${t.a>=0?'+':''}${t.a.toLocaleString()} CC</td><td style="font-size:12px;color:#94a3b8;white-space:nowrap">${t.t}</td></tr>`).join('')}
+  </tbody></table>`;
 }
 
 /* ── 자산순위 탭 ── */
@@ -2984,19 +3123,30 @@ async function fetchRealStocks(){
 function initStocks(){
   stockData=[...DSTOCKS];
   initTaxScheduler();
+  // Supabase stocks 테이블 로드 (있으면 우선)
+  if(SB&&CP?.class_id&&CP?.id!=='demo'&&!CP?._isGuest){
+    SB.from('stocks').select('ticker,name,price,change_pct,updated_at').order('ticker')
+      .then(({data})=>{
+        if(data&&data.length){
+          stockData=data.map(s=>({tk:s.ticker,nm:s.name,pr:parseFloat(s.price)||0,ch:parseFloat(s.change_pct)||0,currency:isNaN(s.ticker)?'USD':'KRW'}));
+          stockIsReal=false; // DB 데이터이므로 'real' 표시는 안 함
+          if(document.getElementById('pg-econ')?.classList.contains('on'))renderStocks();
+        }
+      }).catch(()=>{});
+  }
   fetchRealStocks().then(ok=>{
     if(ok)toast('실시간 주가 로드 완료 📈','s');
-    if(document.getElementById('pg-econ').classList.contains('on'))renderStocks();
+    if(document.getElementById('pg-econ')?.classList.contains('on'))renderStocks();
   });
   // 자동 갱신 5분
   setInterval(()=>{
-    fetchRealStocks().then(()=>{if(document.getElementById('pg-econ').classList.contains('on'))renderStocks();});
+    fetchRealStocks().then(()=>{if(document.getElementById('pg-econ')?.classList.contains('on'))renderStocks();});
   },300000);
   // 데모 fluctuation (실시간이 아닐 때)
   setInterval(()=>{
     if(!stockIsReal){
       stockData=stockData.map(s=>({...s,pr:Math.max(1,+(s.pr*(1+(Math.random()-.5)*.015)).toFixed(2)),ch:+((Math.random()-.45)*5).toFixed(2)}));
-      if(document.getElementById('pg-econ').classList.contains('on'))renderStocks();
+      if(document.getElementById('pg-econ')?.classList.contains('on'))renderStocks();
     }
   },30000);
 }
@@ -3578,7 +3728,7 @@ async function loadDSTU(force){
   if(!data)return;
   DSTU.length=0;
   data.filter(s=>s.role==='student').forEach(s=>{
-    DSTU.push({id:s.id,nm:s.name||'',bal:s.balance||0,gr:s.credit_grade||'B',job:s.job||'학생',sus:s.is_suspended||false});
+    DSTU.push({id:s.id,nm:s.name||'',bal:s.balance||0,gr:s.credit_grade||'B',job:s.job||'학생',sus:s.is_suspended||false,inventory:Array.isArray(s.inventory)?s.inventory:[]});
   });
   _dstuLoaded=true;
 }
@@ -3725,7 +3875,10 @@ async function admTab(tab,btn){
           </div>`}).join('')}
         </div>`;break;}
     case'credit':el.innerHTML=`<div class="tw"><div class="tw-hdr"><div class="tw-title">신용 등급 관리</div></div><table><thead><tr><th>학생</th><th>등급</th><th>점수</th><th>수정</th></tr></thead><tbody>${DSTU.map(s=>`<tr><td>${s.nm}</td><td><span class="chip ${s.gr==='S'?'chip-a':s.gr==='A'?'chip-g':s.gr==='B'?'chip-b':s.gr==='C'?'chip-p':'chip-r'}">${s.gr}</span></td><td>${{S:900,A:800,B:700,C:600,D:500}[s.gr]}</td><td><button class="btn btn-g btn-xs" onclick="editGrade('${s.id}','${s.nm}','${s.gr}')">수정</button></td></tr>`).join('')}</tbody></table></div>`;break;
-    case'time':el.innerHTML=`<div class="g2"><div class="card"><div class="card-t"><svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5.5" stroke="#1d4ed8" stroke-width="1.3"/><path d="M6.5 3.5v3.5l2 1.5" stroke="#1d4ed8" stroke-width="1.3" stroke-linecap="round"/></svg>이용 시간 설정</div><div style="display:flex;flex-direction:column;gap:10px"><div class="fg"><label class="fl">시작</label><input class="fi" type="time" id="ts" value="09:00"></div><div class="fg"><label class="fl">종료</label><input class="fi" type="time" id="te" value="17:00"></div><label style="display:flex;align-items:center;gap:7px;font-size:13px;cursor:pointer"><input type="checkbox" id="ta" style="accent-color:var(--blue)">시간 제한 활성화</label><button class="btn btn-p btn-sm" onclick="saveTime()">저장</button></div></div><div class="card"><div class="card-t"><svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M6.5 1.5C4 1.5 2 3.2 2 5.5c0 1.2.55 2.3 1.4 3V11L6.5 9.5c2.5 0 4.5-1.8 4.5-4S9 1.5 6.5 1.5z" stroke="#1d4ed8" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>수업 메시지</div><div style="display:flex;flex-direction:column;gap:10px"><div class="fg"><label class="fl">메시지</label><input class="fi" id="cmsg" value="수업이 시작됩니다. 자리에 앉아주세요!"></div><div class="fg"><label class="fl">표시 시간</label><input class="fi" type="time" id="ctime" value="09:00"></div><div style="display:flex;gap:6px"><button class="btn btn-p btn-sm" onclick="saveMsg()">저장</button><button class="btn btn-g btn-sm" onclick="showBanner(document.getElementById('cmsg').value)">지금 표시</button></div></div></div></div>`;break;
+    case'time':{
+      const _tr=window._savedTimeRestrict||{};
+      const _cm=window._savedClassMsg||{};
+      el.innerHTML=`<div class="g2"><div class="card"><div class="card-t"><svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5.5" stroke="#1d4ed8" stroke-width="1.3"/><path d="M6.5 3.5v3.5l2 1.5" stroke="#1d4ed8" stroke-width="1.3" stroke-linecap="round"/></svg>이용 시간 설정</div><div style="display:flex;flex-direction:column;gap:10px"><div class="fg"><label class="fl">시작</label><input class="fi" type="time" id="ts" value="${_tr.start||'09:00'}"></div><div class="fg"><label class="fl">종료</label><input class="fi" type="time" id="te" value="${_tr.end||'17:00'}"></div><label style="display:flex;align-items:center;gap:7px;font-size:13px;cursor:pointer"><input type="checkbox" id="ta" style="accent-color:var(--blue)"${_tr.active?' checked':''}>시간 제한 활성화</label><button class="btn btn-p btn-sm" onclick="saveTime()">저장</button></div></div><div class="card"><div class="card-t"><svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M6.5 1.5C4 1.5 2 3.2 2 5.5c0 1.2.55 2.3 1.4 3V11L6.5 9.5c2.5 0 4.5-1.8 4.5-4S9 1.5 6.5 1.5z" stroke="#1d4ed8" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>수업 메시지</div><div style="display:flex;flex-direction:column;gap:10px"><div class="fg"><label class="fl">메시지</label><input class="fi" id="cmsg" value="${escHtml(_cm.text||'수업이 시작됩니다. 자리에 앉아주세요!')}"></div><div class="fg"><label class="fl">표시 시간</label><input class="fi" type="time" id="ctime" value="${_cm.time||'09:00'}"></div><div style="display:flex;gap:6px"><button class="btn btn-p btn-sm" onclick="saveMsg()">저장</button><button class="btn btn-g btn-sm" onclick="showBanner(document.getElementById('cmsg').value)">지금 표시</button></div></div></div></div>`;break;}
     case'notice':{ 
       // Supabase에서 공지 로드
       if(SB&&CP?.class_id&&(!window._notices||window._notices._loaded!==CP.class_id)){
@@ -4283,8 +4436,23 @@ function delItem(id){confirmDel('이 상품을 삭제할까요?',()=>{
   admTab('shop',null);toast('삭제','i');
   if(SB) SB.from('shop_items').update({is_active:false}).eq('id',String(id)).then(()=>{}).catch(()=>{});
 });}
-function saveTime(){toast(`시간 제한 저장`,'s');}
-function saveMsg(){toast('메시지 저장됨','s');}
+function saveTime(){
+  const ts=document.getElementById('ts')?.value;
+  const te=document.getElementById('te')?.value;
+  const ta=document.getElementById('ta')?.checked;
+  toast(`시간 제한 저장됨`,'s');
+  if(SB&&CP?.class_id&&CP?.id!=='demo'){
+    mergeClassSettings({timeRestrict:{start:ts,end:te,active:ta}});
+  }
+}
+function saveMsg(){
+  const msg=document.getElementById('cmsg')?.value?.trim();
+  const ctime=document.getElementById('ctime')?.value;
+  toast('메시지 저장됨','s');
+  if(SB&&CP?.class_id&&CP?.id!=='demo'){
+    mergeClassSettings({classMsg:{text:msg,time:ctime}});
+  }
+}
 async function addNotice(){
   const t=document.getElementById('nc-t')?.value?.trim();
   const b=document.getElementById('nc-b')?.value?.trim();
@@ -4311,7 +4479,10 @@ function saveClassSettings2(){
   if(nm)CP.class_name=nm;
   if(sc){CP.school=sc;const snEl=document.getElementById('meal-school-name');if(snEl)snEl.textContent=sc+' 급식 정보';}
   buildSidebar();buildNav();
-  if(SB&&CU){SB.from('profiles').update({class_name:nm,school:sc}).eq('id',CU.id).then(()=>{}).catch(()=>{});}
+  if(SB&&CU){
+    SB.from('profiles').update({class_name:nm,school:sc}).eq('id',CU.id).then(()=>{}).catch(()=>{});
+    if(CP?.class_id){SB.from('classes').update({name:nm,school:sc}).eq('id',CP.class_id).then(()=>{}).catch(()=>{});}
+  }
   toast('학급 설정 저장됨! ✅','s');
   devTab('classmanage',null);
 }
@@ -4321,7 +4492,10 @@ function saveClassSettings(){
   if(nm)CP.class_name=nm;
   if(sc){CP.school=sc;const snEl=document.getElementById('meal-school-name');if(snEl)snEl.textContent=sc+' 급식 정보';}
   buildSidebar();buildNav();
-  if(SB&&CU){SB.from('profiles').update({class_name:nm,school:sc}).eq('id',CU.id).then(()=>{}).catch(()=>{});}
+  if(SB&&CU){
+    SB.from('profiles').update({class_name:nm,school:sc}).eq('id',CU.id).then(()=>{}).catch(()=>{});
+    if(CP?.class_id){SB.from('classes').update({name:nm,school:sc}).eq('id',CP.class_id).then(()=>{}).catch(()=>{});}
+  }
   toast('학급 설정 저장됨! ✅','s');
   admTab('classmanage',null);
 }
@@ -4410,6 +4584,8 @@ function joinGroupBuy(itemId,goal){
   if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest){
     SB.from('profiles').update({balance:CP.balance}).eq('id',CU.id).then(()=>{}).catch(()=>{});
     SB.from('transactions').insert({from_id:CU.id,to_id:CU.id,amount:-amt,type:'purchase',description:'공동구매 기부',class_id:CP.class_id||null}).then(()=>{}).catch(()=>{});
+    // groupBuyData를 classes.settings에 저장
+    if(CP?.class_id) mergeClassSettings({groupBuyData});
   }
 }
 
@@ -5218,7 +5394,7 @@ function devTab(tab,btn){
               <option value="quests">quests</option>
               <option value="quest_completions">quest_completions</option>
               <option value="shop_items">shop_items</option>
-              <option value="messages">messages</option>
+              <option value="channel_messages">channel_messages</option>
               <option value="market_listings">market_listings</option>
               <option value="boards">boards</option>
             </select>
@@ -5516,7 +5692,7 @@ async function runDevQuery(){
   try{
     let q=SB.from(table).select('*').limit(limit);
     if(filterRaw){
-      const m=filterRaw.match(/^(w+)=(w+).(.+)$/);
+      const m=filterRaw.match(/^(\w+)=(\w+)\.(.+)$/);
       if(m){
         const[,col,op,val]=m;
         if(op==='eq')q=q.eq(col,val);
@@ -6172,9 +6348,9 @@ async function switchDscCh(chId){
     if(main)main.innerHTML=renderDscMain(chId);
     scrollDscBottom();
     try{
-      const{data}=await SB.from('messages')
+      const{data}=await SB.from('channel_messages')
         .select('id,author_id,author_name,content,image_url,created_at')
-        .eq('class_id',CP.class_id).eq('channel',chId)
+        .eq('class_id',CP.class_id).eq('channel_id',chId)
         .order('created_at',{ascending:true}).limit(100);
       if(data&&data.length){
         const roleColors={teacher:'#1d4ed8',dev:'#6d28d9'};
@@ -6223,12 +6399,13 @@ function sendDscMsg(chId){
   if(el){el.insertAdjacentHTML('beforeend',renderDscMsg(msg,isFirst));el.scrollTop=el.scrollHeight;}
   // Supabase 저장
   if(SB&&CU&&CP?.class_id){
-    SB.from('messages').insert({
+    SB.from('channel_messages').insert({
       class_id:CP.class_id,
-      channel:chId,
+      channel_id:chId,
       author_id:CU.id,
       author_name:CP.name||'학생',
-      content:txt
+      content:txt,
+      msg_type:'text'
     }).catch(()=>{});
   }
 }
@@ -6281,11 +6458,12 @@ async function handleDscFile(e,chId){
     if(el){el.insertAdjacentHTML('beforeend',renderDscMsg(msg,isFirst));el.scrollTop=el.scrollHeight;}
     // DB 저장
     if(CP?.class_id){
-      SB.from('messages').insert({
-        class_id:CP.class_id,channel:chId,
+      SB.from('channel_messages').insert({
+        class_id:CP.class_id,channel_id:chId,
         author_id:CU.id,author_name:CP.name||'학생',
         content:file.name,
-        image_url:isImg?fileUrl:null
+        image_url:isImg?fileUrl:null,
+        msg_type:isImg?'image':'file'
       }).catch(()=>{});
     }
     toast(`${isImg?'📷 사진':'📎 파일'} 전송 완료`,'s');
@@ -6315,10 +6493,11 @@ function sendAnnouncement(){
   }
   toast('공지 등록 완료','s');
   if(SB&&CU&&CP?.class_id&&CP?.id!=='demo'&&!CP?._isGuest){
-    SB.from('messages').insert({
-      class_id:CP.class_id,channel:'notice',
+    SB.from('channel_messages').insert({
+      class_id:CP.class_id,channel_id:'notice',
       author_id:CU.id,author_name:CP.name||'선생님',
-      content:'📢 '+txt.trim()
+      content:'📢 '+txt.trim(),
+      msg_type:'text'
     }).catch(()=>{});
   }
 }
@@ -6414,6 +6593,13 @@ function savePluginStorage(){
     localStorage.setItem('cw_user_plugins',JSON.stringify(userPlugins));
     localStorage.setItem('cw_installed',JSON.stringify([...installedSet]));
   }catch(_){}
+  // Supabase에도 동기화
+  if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest){
+    SB.from('profiles').update({
+      user_plugins:userPlugins,
+      installed_plugins:[...installedSet]
+    }).eq('id',CU.id).catch(()=>{});
+  }
 }
 
 /* ── 커뮤니티 탭 ── */
@@ -6425,9 +6611,8 @@ async function loadNationalPosts(){
   if(!SB||!CU||CP?.id==='demo'||CP?._isGuest){nationalPosts=[];return;}
   try{
     const{data}=await SB.from('board_posts')
-      .select('id,author_id,author_name,content,created_at')
+      .select('id,author_id,author_name,content,school,created_at')
       .is('class_id',null)
-      
       .order('created_at',{ascending:false}).limit(50);
     if(data&&data.length){
       nationalPosts=data.map(p=>({
@@ -6811,8 +6996,22 @@ function runPluginCode(code){
       getStudents:()=>DSTU,
       getStudent:(nm)=>DSTU.find(s=>s.nm===nm),
       announce:(msg)=>showBanner(msg),
-      save:(key,val)=>{try{localStorage.setItem('plg_'+key,JSON.stringify(val));}catch(_){}},
-      load:(key,def)=>{try{return JSON.parse(localStorage.getItem('plg_'+key))??def;}catch(_){return def;}},
+      save:(key,val)=>{
+        try{localStorage.setItem('plg_'+key,JSON.stringify(val));}catch(_){}
+        if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest){
+          // plugin_data JSONB 컬럼에 병합 저장
+          SB.from('profiles').select('plugin_data').eq('id',CU.id).single()
+            .then(({data})=>{
+              const merged={...(data?.plugin_data||{}),[key]:val};
+              SB.from('profiles').update({plugin_data:merged}).eq('id',CU.id).catch(()=>{});
+            }).catch(()=>{});
+        }
+      },
+      load:(key,def)=>{
+        // Supabase에서 먼저 읽기 (비동기이므로 우선 localStorage fallback)
+        try{const v=localStorage.getItem('plg_'+key);if(v!==null)return JSON.parse(v)??def;}catch(_){}
+        return def;
+      },
       input:(label,def)=>prompt(label,def||''),
       confirm:(msg)=>confirm(msg),
       alert:(msg)=>alert(msg),
@@ -7411,7 +7610,7 @@ async function loadQuests(){
     // 내 완료 상태 로드
     if(CU){
       let _r4={data:[]};try{_r4=await SB.from('quest_completions').select('quest_id,status').eq('user_id',CU.id);}catch(_){}
-    const{data:comps}=_r4;
+      const{data:comps}=_r4;
       (comps||[]).forEach(c=>{
         const q=questData.find(x=>String(x.id)===String(c.quest_id));
         if(q) q.status=c.status==='approved'?'done':'pending';
@@ -7439,10 +7638,22 @@ async function loadQuests(){
 
 function qf(f,btn){
   qFilter=f;
+  selQuestId=null; // 필터 변경 시 선택 초기화 → 첫 항목 자동선택
   document.querySelectorAll('#qf-wrap .btn').forEach(b=>{
     b.className=b===btn?'btn btn-p btn-xs':'btn btn-g btn-xs';
   });
+  // 중앙/우측 패널 초기화
+  const main=document.getElementById('quests-main-area');
+  const panel=document.getElementById('quests-info-panel');
+  if(main)main.innerHTML=`<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:16px;padding:40px">
+    <div style="width:72px;height:72px;border-radius:20px;background:#eff6ff;display:flex;align-items:center;justify-content:center">
+      <svg width="36" height="36" viewBox="0 0 36 36" fill="none"><circle cx="18" cy="18" r="15" stroke="#3b82f6" stroke-width="1.8"/><path d="M12 18l4.5 4.5 7.5-9" stroke="#3b82f6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </div>
+    <div style="text-align:center"><div style="font-size:17px;font-weight:800;color:#1d4ed8;margin-bottom:6px">퀘스트를 선택하세요</div><div style="font-size:13px;color:#94a3b8;line-height:1.6">좌측에서 퀘스트를 클릭하면<br>상세 내용이 표시됩니다</div></div>
+  </div>`;
+  if(panel)panel.innerHTML='';
   renderQuestSidebar();
+  return false;
 }
 
 function renderQuestSidebar(){
@@ -7460,17 +7671,17 @@ function renderQuestSidebar(){
     </div>`:''}
     <div style="font-size:11px;color:#94a3b8;font-weight:700;text-transform:uppercase;letter-spacing:.8px;padding:0 4px;margin-bottom:6px">진행중 ${list.filter(q=>q.status==='active').length}개</div>
     ${list.map(q=>{
-      const sel=selQuestId===q.id;
+      const sel=String(selQuestId)===String(q.id);
       const stColor={active:'#1d4ed8',done:'#15803d',pending:'#f59e0b'}[q.status]||'#94a3b8';
       const stLabel={active:'진행중',done:'완료',pending:'대기'}[q.status]||q.status;
-      return `<div onclick="selectQuest(${q.id})" style="padding:12px;border-radius:12px;cursor:pointer;margin-bottom:4px;background:${sel?'#eff6ff':'transparent'};border:1.5px solid ${sel?'#3b82f6':'transparent'};transition:.15s" onmouseover="if(${!sel})this.style.background='#f8faff'" onmouseout="if(${!sel})this.style.background='transparent'">
+      return `<div onclick="selectQuest(${q.id})" style="padding:12px;border-radius:12px;cursor:pointer;margin-bottom:4px;background:${sel?'#eff6ff':'transparent'};border:1.5px solid ${sel?'#3b82f6':'transparent'};transition:.15s" onmouseover="${sel?'':'this.style.background=\'#f8faff\''}" onmouseout="${sel?'':'this.style.background=\'transparent\''}">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
           <span style="width:7px;height:7px;border-radius:50%;background:${stColor};flex-shrink:0"></span>
           <span style="font-size:13.5px;font-weight:700;color:#0f172a;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(q.title)}</span>
           <span style="font-size:11px;font-weight:700;color:${stColor};flex-shrink:0">${stLabel}</span>
         </div>
         <div style="display:flex;align-items:center;gap:8px">
-          <div style="flex:1;height:4px;background:#f1f5f9;border-radius:99px;overflow:hidden"><div style="height:100%;background:${stColor};width:${Math.round((q.prog/q.total)*100)}%;transition:.4s"></div></div>
+          <div style="flex:1;height:4px;background:#f1f5f9;border-radius:99px;overflow:hidden"><div style="height:100%;background:${stColor};width:${q.total>0?Math.round((q.prog/q.total)*100):0}%;transition:.4s"></div></div>
           <div class="cc-coin-ico cc-coin-ico-sm">C</div>
           <span style="font-size:12px;font-weight:700;color:#b45309">${q.reward}</span>
         </div>
@@ -7484,7 +7695,7 @@ function renderQuestSidebar(){
 function selectQuest(id){
   selQuestId=id;
   renderQuestSidebar();
-  const q=questData.find(q=>q.id===id);
+  const q=questData.find(q=>String(q.id)===String(id));
   if(!q)return;
   const main=document.getElementById('quests-main-area');
   const panel=document.getElementById('quests-info-panel');
@@ -7534,7 +7745,7 @@ function selectQuest(id){
       </div>
     </div>`;
   } else {
-    const pct=Math.round(q.prog/q.total*100);
+    const pct=q.total>0?Math.round(q.prog/q.total*100):0;
     main.innerHTML=`<div style="padding:24px">
       <div style="font-size:20px;font-weight:900;color:#0f172a;margin-bottom:8px">${escHtml(q.title)}</div>
       <div style="font-size:14px;color:#64748b;margin-bottom:20px">${escHtml(q.desc)}</div>
@@ -7582,7 +7793,7 @@ function selectQuest(id){
         <div style="font-size:11px;color:#94a3b8;margin-top:2px">미완료</div>
       </div>
     </div>
-    ${canApprove?`<button class="btn btn-r btn-sm" style="width:100%;margin-top:12px" onclick="if(confirm('퀘스트를 삭제할까요?')){questData=questData.filter(q=>q.id!==${id});renderQuestSidebar();document.getElementById('quests-main-area').innerHTML='';document.getElementById('quests-info-panel').innerHTML='';toast('삭제됨','i');}">퀘스트 삭제</button>`:''}
+    ${canApprove?`<button class="btn btn-r btn-sm" style="width:100%;margin-top:12px" onclick="if(confirm('퀘스트를 삭제할까요?')){questData=questData.filter(q=>String(q.id)!==String(${JSON.stringify(id)}));if(SB&&CU&&CP?.id!=='demo'){SB.from('quests').update({is_active:false}).eq('id',String(${JSON.stringify(id)})).then(()=>{}).catch(()=>{});}selQuestId=null;renderQuestSidebar();document.getElementById('quests-main-area').innerHTML='<div style=\"display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:16px;padding:40px\"><div style=\"font-size:17px;font-weight:800;color:#1d4ed8\">퀘스트를 선택하세요</div></div>';document.getElementById('quests-info-panel').innerHTML='';toast('삭제됨','i');}">퀘스트 삭제</button>`:''}
   </div>`;
 }
 
@@ -7610,7 +7821,37 @@ function bulkApproveQuest(qid,reward){
   pending.forEach(a=>approveQuest(qid,a.uid,reward));
 }
 
-function selectQuestStu(uid,qid){}
+function selectQuestStu(uid,qid){
+  const s=DSTU.find(x=>x.id===uid);
+  const q=questData.find(x=>String(x.id)===String(qid));
+  if(!s||!q)return;
+  const existing=document.getElementById('md-stu-quest');
+  if(existing)existing.remove();
+  const approval=questApprovals.find(a=>a.uid===uid&&String(a.qid)===String(qid));
+  const col=`hsl(${(s.nm.charCodeAt(0)*37+s.nm.charCodeAt(s.nm.length-1)*13)%360},55%,65%)`;
+  document.body.insertAdjacentHTML('beforeend',`
+  <div class="ov on" id="md-stu-quest">
+    <div class="modal" style="width:min(400px,94vw)">
+      <div class="mhdr">
+        <div class="mtitle">퀘스트 제출 확인</div>
+        <button class="mclose" onclick="document.getElementById('md-stu-quest').remove()"><svg viewBox="0 0 9 9" fill="none" width="9" height="9"><path d="M1 1l7 7M8 1L1 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
+      </div>
+      <div style="display:flex;align-items:center;gap:14px;padding:16px;background:#f8faff;border-radius:14px;margin-bottom:16px">
+        <div style="width:44px;height:44px;border-radius:50%;background:${col};display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:900;color:#fff;flex-shrink:0">${s.nm[0]}</div>
+        <div>
+          <div style="font-size:15px;font-weight:800;color:#0f172a">${escHtml(s.nm)}</div>
+          <div style="font-size:12px;color:#64748b;margin-top:2px">📋 ${escHtml(q.title)} · +${q.reward} CC</div>
+        </div>
+      </div>
+      ${approval?`<div style="padding:10px 14px;background:#fffbeb;border:1px solid #fcd34d;border-radius:10px;font-size:13px;color:#92400e;margin-bottom:14px">⏳ 승인 대기 중인 제출이 있어요</div>`:'<div style="padding:10px 14px;background:#f1f5f9;border-radius:10px;font-size:13px;color:#64748b;margin-bottom:14px">아직 퀘스트를 제출하지 않았어요</div>'}
+      <div class="mfoot">
+        <button class="btn btn-g" onclick="document.getElementById('md-stu-quest').remove()">닫기</button>
+        ${approval?`<button class="btn btn-r btn-sm" onclick="rejectQuest('${qid}','${uid}');document.getElementById('md-stu-quest').remove()">반려</button>
+        <button class="btn btn-p btn-sm" onclick="approveQuest('${qid}','${uid}',${q.reward});document.getElementById('md-stu-quest').remove()">승인 +${q.reward} CC</button>`:''}
+      </div>
+    </div>
+  </div>`);
+}
 
 function renderQuests(){renderQuestSidebar();}
 
@@ -7618,7 +7859,8 @@ function initChatAutoClean(){
   setInterval(()=>{
     const cutoff=Date.now()-30*60*1000;
     Object.keys(DSC_MSGS).forEach(ch=>{
-      DSC_MSGS[ch]=DSC_MSGS[ch].filter(m=>m._ts&&m._ts>cutoff);
+      // _ts가 없는 초기 더미 메시지는 보존
+      DSC_MSGS[ch]=DSC_MSGS[ch].filter(m=>!m._ts||m._ts>cutoff);
     });
   },60*1000);
 }
@@ -8221,8 +8463,15 @@ function pedTest(){
     const testToast=(m,t)=>{logs.push((t==='e'?'❌ ':'t'==='s'?'✅ ':'ℹ️ ')+m);origToast(m,t);};
     const pluginAPI={CP,DSTU,toast:testToast,syncCoin,reward:(a,r)=>{logs.push('💰 +'+a+' CC ('+(r||'보상')+')');},
       deduct:(a,r)=>{logs.push('💸 -'+a+' CC ('+(r||'차감')+')');return(CP.balance||0)>=a;},
-      announce:(m)=>logs.push('📢 '+m),save:(k,v)=>localStorage.setItem('plg_'+k,JSON.stringify(v)),
-      load:(k,d)=>{try{return JSON.parse(localStorage.getItem('plg_'+k))||d;}catch(_){return d;}},
+      announce:(m)=>logs.push('📢 '+m),
+      save:(k,v)=>{
+        localStorage.setItem('plg_'+k,JSON.stringify(v));
+        if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest){
+          SB.from('profiles').select('plugin_data').eq('id',CU.id).single()
+            .then(({data})=>{const merged={...(data?.plugin_data||{}),[k]:v};SB.from('profiles').update({plugin_data:merged}).eq('id',CU.id).catch(()=>{});}).catch(()=>{});
+        }
+      },
+      load:(k,d)=>{try{const v=localStorage.getItem('plg_'+k);if(v!==null)return JSON.parse(v)||d;}catch(_){}return d;},
       getStudents:()=>DSTU,random:(mn,mx)=>Math.floor(Math.random()*(mx-mn+1))+mn,
       pick:(a)=>a[Math.floor(Math.random()*a.length)],shuffle:(a)=>[...a].sort(()=>Math.random()-.5),
       stockData,now:()=>new Date(),today:()=>new Date().toISOString().slice(0,10),

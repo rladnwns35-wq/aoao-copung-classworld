@@ -6,6 +6,60 @@
 <title>ClassWorld</title>
 <link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" rel="stylesheet">
 <script>
+/* -- Supabase 안전 저장 헬퍼 -----------------------------------------------
+   sbSave(promise, label)
+   - promise: SB.from(...).update/insert/upsert/delete 의 반환값
+   - label: 오류 시 토스트에 표시할 이름 (optional)
+   - 에러 시 toast로 알림 + console.error
+   - 정상 시 조용히 성공
+---------------------------------------------------------------------------- */
+async function sbSave(promise, label){
+  try{
+    const res = await promise;
+    if(res && res.error){
+      console.error('[sbSave] '+( label||'저장')+ ' 오류:', res.error.message);
+      toast('⚠️ '+(label||'저장')+' 실패: '+res.error.message, 'e');
+      return false;
+    }
+    return true;
+  }catch(e){
+    console.error('[sbSave] '+(label||'저장')+' 예외:', e);
+    toast('⚠️ '+(label||'저장')+' 실패: '+(e.message||'서버 오류'), 'e');
+    return false;
+  }
+}
+
+/* 프로필 전체 동기화: CP의 모든 필드를 Supabase에 저장 */
+async function syncProfile(fields){
+  if(!SB||!CU||CP?.id==='demo'||CP?._isGuest) return true;
+  const payload = fields || {
+    name:           CP.name,
+    bio:            CP.bio||'',
+    job:            CP.job||'학생',
+    job_salary:     CP.job_salary||0,
+    balance:        CP.balance||0,
+    credit_score:   CP.credit_score||700,
+    credit_grade:   CP.credit_grade||'B',
+    inventory:      CP.inventory||[],
+    equipped_avatar:CP.equippedAvatar||null,
+    equipped_banner:CP.equippedBanner||null,
+    custom_avatar_url: CP.customAvatarImg||null,
+    custom_banner_url: CP.customBannerImg||null,
+    stock_holdings: CP.stock_holdings||CP.stockHoldings||{},
+    pending_job:    CP.pendingJob||null,
+    school:         CP.school||'',
+    office_code:    CP.office_code||null,
+    school_code:    CP.school_code||null,
+    class_id:       CP.class_id||null,
+    class_name:     CP.class_name||null,
+    is_suspended:   CP.is_suspended||false,
+  };
+  return await sbSave(
+    SB.from('profiles').update(payload).eq('id', CU.id),
+    '프로필 저장'
+  );
+}
+
 (function(){
   var urls=[
     'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.7/dist/umd/supabase.min.js',
@@ -128,7 +182,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);height:100vh
 .cs-val{flex:1;}
 .cs-arr{color:#94a3b8;transition:transform .15s;display:flex;}
 .cs-btn.open .cs-arr{transform:rotate(180deg);}
-.cs-drop{position:absolute;top:calc(100% + 6px);left:0;right:0;background:#fff;border:1.5px solid #e2e8f0;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.1);z-index:400;overflow:hidden;display:none;animation:ddIn .14s ease;}
+.cs-drop{position:fixed;background:#fff;border:1.5px solid #e2e8f0;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.15);z-index:9999;overflow:hidden;display:none;animation:ddIn .14s ease;min-width:160px;}
 @keyframes ddIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
 .cs-drop.on{display:block;}
 .cs-opt{display:flex;align-items:center;gap:10px;padding:10px 13px;font-size:13.5px;color:#374151;cursor:pointer;transition:background .12s;font-weight:500;}
@@ -257,12 +311,12 @@ select.fi{appearance:none;background-image:url("data:image/svg+xml,%3Csvg width=
 
 .cnt-full{flex:1;overflow:hidden;display:flex;flex-direction:column;min-width:0;height:100%;min-height:0;}
 .cnt-full #cnt{flex:1;padding:28px 32px;overflow-y:auto;max-width:1200px;margin:0 auto;width:100%;min-height:0;scrollbar-gutter:stable;}
+.cnt-full #cnt:has(.page-full.on),.cnt-full #cnt:has(#pg-quests.on){padding:0!important;max-width:none!important;overflow:hidden!important;display:flex!important;flex-direction:column!important;height:100%!important;}
 .page{display:none;overflow-y:auto;}
 .page.on{padding:28px 32px;}
 .page.on{display:block;}
 .page-full{display:none;flex-direction:column;}
 .page-full.on{display:flex;height:100%;}
-#pg-quests.on{display:flex;flex-direction:column;height:100%;padding:0!important;overflow:hidden!important;}
 @keyframes pgIn{from{opacity:0}to{opacity:1}}
 
 /* ── PAGE HEADER ── */
@@ -651,10 +705,10 @@ hr.div{border:none;border-top:1px solid #f1f5f9;margin:16px 0;}
     <div style="position:absolute;top:-120px;right:-120px;width:400px;height:400px;border-radius:50%;background:radial-gradient(circle,rgba(59,130,246,.15),transparent 70%)"></div>
     <div style="position:absolute;bottom:-100px;left:-80px;width:350px;height:350px;border-radius:50%;background:radial-gradient(circle,rgba(139,92,246,.1),transparent 70%)"></div>
   </div>
-  <div style="display:flex;width:min(960px,100vw);height:min(640px,100vh);background:#fff;border-radius:24px;overflow:hidden;box-shadow:0 40px 100px rgba(0,0,0,.5);position:relative">
+  <div style="display:flex;width:min(1100px,100vw);height:min(740px,100vh);background:#fff;border-radius:24px;overflow:hidden;box-shadow:0 40px 100px rgba(0,0,0,.5);position:relative">
 
     <!-- ── 왼쪽 ── -->
-    <div style="flex:0 0 400px;background:linear-gradient(160deg,#1d4ed8 0%,#2563eb 40%,#4f46e5 100%);padding:40px 40px;display:flex;flex-direction:column;position:relative;overflow:hidden">
+    <div style="flex:0 0 460px;background:linear-gradient(160deg,#1d4ed8 0%,#2563eb 40%,#4f46e5 100%);padding:48px 48px;display:flex;flex-direction:column;position:relative;overflow:hidden">
       <div style="position:absolute;top:-80px;right:-80px;width:280px;height:280px;border-radius:50%;background:rgba(255,255,255,.06)"></div>
       <div style="position:absolute;bottom:-60px;left:-40px;width:200px;height:200px;border-radius:50%;background:rgba(255,255,255,.04)"></div>
       <div style="position:relative;z-index:1;display:flex;flex-direction:column;height:100%">
@@ -700,51 +754,51 @@ hr.div{border:none;border-top:1px solid #f1f5f9;margin:16px 0;}
     <!-- ── 오른쪽 ── -->
     <div style="flex:1;display:flex;flex-direction:column;background:#fff;min-width:0;overflow:hidden;border-radius:0 24px 24px 0">
       <!-- 탭 헤더 고정 -->
-      <div style="padding:20px 44px 0;flex-shrink:0">
-        <div style="font-size:24px;font-weight:900;color:#0f172a;letter-spacing:-.8px;margin-bottom:4px">시작하기</div>
-        <div style="font-size:13.5px;color:#94a3b8;margin-bottom:16px">계정으로 로그인하거나 새로 가입하세요</div>
+      <div style="padding:28px 56px 0;flex-shrink:0">
+        <div style="font-size:30px;font-weight:900;color:#0f172a;letter-spacing:-.8px;margin-bottom:6px">시작하기</div>
+        <div style="font-size:15px;color:#94a3b8;margin-bottom:20px">계정으로 로그인하거나 새로 가입하세요</div>
         <div style="display:flex;border-bottom:2px solid #f1f5f9;margin-bottom:0">
-          <button id="tab-login" onclick="switchAuthTab('login')" style="padding:10px 0;margin-right:28px;background:none;border:none;font-size:14px;font-weight:700;cursor:pointer;color:#1d4ed8;border-bottom:2px solid #1d4ed8;margin-bottom:-2px">로그인</button>
-          <button id="tab-reg" onclick="switchAuthTab('reg')" style="padding:10px 0;background:none;border:none;font-size:14px;font-weight:600;cursor:pointer;color:#94a3b8;border-bottom:2px solid transparent;margin-bottom:-2px">회원가입</button>
+          <button id="tab-login" onclick="switchAuthTab('login')" style="padding:12px 0;margin-right:32px;background:none;border:none;font-size:16px;font-weight:700;cursor:pointer;color:#1d4ed8;border-bottom:2px solid #1d4ed8;margin-bottom:-2px">로그인</button>
+          <button id="tab-reg" onclick="switchAuthTab('reg')" style="padding:12px 0;background:none;border:none;font-size:16px;font-weight:600;cursor:pointer;color:#94a3b8;border-bottom:2px solid transparent;margin-bottom:-2px">회원가입</button>
         </div>
       </div>
       <!-- 스크롤 영역 -->
-      <div style="flex:1;overflow-y:auto;padding:10px 44px 48px;scrollbar-gutter:stable;margin-bottom:24px;border-radius:0 0 24px 0;">
+      <div style="flex:1;overflow-y:auto;padding:16px 56px 56px;scrollbar-gutter:stable;margin-bottom:24px;border-radius:0 0 24px 0;">
         <!-- 로그인 폼 -->
-        <div id="af-login" style="display:flex;flex-direction:column;gap:14px">
+        <div id="af-login" style="display:flex;flex-direction:column;gap:18px">
           <div>
-            <label style="display:block;font-size:13px;font-weight:700;color:#374151;margin-bottom:6px">이메일</label>
-            <input class="fi" id="l-em" type="email" placeholder="you@email.com" style="height:48px;font-size:14px">
+            <label style="display:block;font-size:14px;font-weight:700;color:#374151;margin-bottom:8px">이메일</label>
+            <input class="fi" id="l-em" type="email" placeholder="you@email.com" style="height:54px;font-size:15px">
           </div>
           <div>
-            <label style="display:block;font-size:13px;font-weight:700;color:#374151;margin-bottom:6px">비밀번호</label>
-            <input class="fi" id="l-pw" type="password" placeholder="••••••" style="height:48px;font-size:14px" onkeydown="if(event.key==='Enter')doLogin()">
+            <label style="display:block;font-size:14px;font-weight:700;color:#374151;margin-bottom:8px">비밀번호</label>
+            <input class="fi" id="l-pw" type="password" placeholder="••••••" style="height:54px;font-size:15px" onkeydown="if(event.key==='Enter')doLogin()">
           </div>
           <div class="fe" id="l-err" style="display:none"></div>
-          <button class="btn btn-p" id="l-btn" onclick="doLogin()" style="height:50px;font-size:15px;font-weight:800;border-radius:13px;margin-top:4px">
+          <button class="btn btn-p" id="l-btn" onclick="doLogin()" style="height:58px;font-size:16px;font-weight:800;border-radius:14px;margin-top:6px">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6 12H3a1 1 0 01-1-1V5a1 1 0 011-1h3" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/><path d="M11 11l4-3-4-3M15 8H7" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
             로그인
           </button>
           <div style="height:48px"></div>
         </div>
         <!-- 회원가입 폼 -->
-        <div id="af-reg" style="display:none;flex-direction:column;gap:12px">
+        <div id="af-reg" style="display:none;flex-direction:column;gap:16px">
           <div>
             <label style="display:block;font-size:13px;font-weight:700;color:#374151;margin-bottom:6px">이름</label>
-            <input class="fi" id="r-nm" placeholder="홍길동" style="height:46px">
+            <input class="fi" id="r-nm" placeholder="홍길동" style="height:52px;font-size:15px">
           </div>
           <div>
             <label style="display:block;font-size:13px;font-weight:700;color:#374151;margin-bottom:6px">이메일</label>
-            <input class="fi" id="r-em" type="email" placeholder="you@email.com" style="height:46px">
+            <input class="fi" id="r-em" type="email" placeholder="you@email.com" style="height:52px;font-size:15px">
           </div>
           <div>
             <label style="display:block;font-size:13px;font-weight:700;color:#374151;margin-bottom:6px">비밀번호 (6자 이상)</label>
-            <input class="fi" id="r-pw" type="password" placeholder="••••••" style="height:46px" onkeydown="if(event.key==='Enter')doReg()">
+            <input class="fi" id="r-pw" type="password" placeholder="••••••" style="height:52px;font-size:15px" onkeydown="if(event.key==='Enter')doReg()">
           </div>
           <div>
             <label style="display:block;font-size:13px;font-weight:700;color:#374151;margin-bottom:6px">역할</label>
             <div class="cs" id="cs-role">
-              <button class="cs-btn" onclick="csToggle('cs-role')" data-val="student" style="height:46px">
+              <button class="cs-btn" onclick="csToggle('cs-role')" data-val="student" style="height:52px">
                 <span class="cs-val">🎓 학생</span>
                 <svg class="cs-arr" width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 4l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
               </button>
@@ -756,14 +810,14 @@ hr.div{border:none;border-top:1px solid #f1f5f9;margin:16px 0;}
           </div>
           <div id="code-fg" style="display:flex;flex-direction:column;gap:6px">
             <label style="font-size:13px;font-weight:700;color:#374151">학급 코드</label>
-            <input class="fi" id="r-code" placeholder="예: ABC123" style="height:46px;text-transform:uppercase;letter-spacing:4px;font-weight:700;font-size:16px" maxlength="6">
+            <input class="fi" id="r-code" placeholder="예: ABC123" style="height:52px;text-transform:uppercase;letter-spacing:4px;font-weight:700;font-size:17px" maxlength="6">
             <div style="font-size:11.5px;color:#94a3b8;display:flex;align-items:center;gap:4px">
               <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><circle cx="6" cy="6" r="5" stroke="#94a3b8" stroke-width="1.2"/><path d="M6 5.5v3M6 4h.01" stroke="#94a3b8" stroke-width="1.2" stroke-linecap="round"/></svg>
               선생님 → 관리자 패널 → 학급관리에서 코드를 확인하세요
             </div>
           </div>
           <div class="fe" id="r-err" style="display:none"></div>
-          <button class="btn btn-p" id="r-btn" onclick="doReg()" style="height:50px;font-size:15px;font-weight:800;border-radius:13px;margin-top:4px">
+          <button class="btn btn-p" id="r-btn" onclick="doReg()" style="height:58px;font-size:16px;font-weight:800;border-radius:14px;margin-top:6px">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M12 8H4M8 4l4 4-4 4" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
             가입하기
           </button>
@@ -889,7 +943,7 @@ hr.div{border:none;border-top:1px solid #f1f5f9;margin:16px 0;}
       </div>
 
       <!-- ══ QUESTS ════════════════════════════════ -->
-      <div class="page" id="pg-quests" style="padding:0!important;overflow:hidden!important;position:relative;flex-direction:column;height:100%;">
+      <div class="page" id="pg-quests" style="padding:0!important;overflow:hidden!important;position:relative;">
         <div style="display:grid;grid-template-columns:320px 1fr 280px;height:100%;overflow:hidden;background:#f8faff;">
           <!-- 좌측: 퀘스트 목록 -->
           <div style="border-right:1.5px solid #eef2f8;display:flex;flex-direction:column;overflow:hidden;background:#fff;height:100%;padding-bottom:16px;">
@@ -899,10 +953,10 @@ hr.div{border:none;border-top:1px solid #f1f5f9;margin:16px 0;}
                 퀘스트
               </div>
               <div style="display:flex;gap:4px;flex-wrap:wrap" id="qf-wrap">
-                <button class="btn btn-p btn-xs" onclick="qf('all',this);return false;">전체</button>
-                <button class="btn btn-g btn-xs" onclick="qf('active',this);return false;">진행중</button>
-                <button class="btn btn-g btn-xs" onclick="qf('done',this);return false;">완료</button>
-                <button class="btn btn-g btn-xs" onclick="qf('pending',this);return false;">대기</button>
+                <button class="btn btn-p btn-xs" onclick="qf('all',this)">전체</button>
+                <button class="btn btn-g btn-xs" onclick="qf('active',this)">진행중</button>
+                <button class="btn btn-g btn-xs" onclick="qf('done',this)">완료</button>
+                <button class="btn btn-g btn-xs" onclick="qf('pending',this)">대기</button>
               </div>
             </div>
             <div style="flex:1;overflow-y:auto;padding:10px" id="quests-list-sidebar"></div>
@@ -1399,7 +1453,7 @@ hr.div{border:none;border-top:1px solid #f1f5f9;margin:16px 0;}
         </div>
         <!-- 코드 에디터 -->
         <div style="flex:1;position:relative;min-height:0">
-          <div style="position:absolute;top:0;left:0;bottom:0;width:40px;background:#f1f5f9;border-right:1px solid #e2e8f0;z-index:1;overflow:hidden" id="ped-line-nums" style="display:flex;flex-direction:column;align-items:flex-end;padding:12px 8px 12px 0;gap:0;font-family:monospace;font-size:13px;color:#4a5568;line-height:1.6"></div>
+          <div id="ped-line-nums" style="position:absolute;top:0;left:0;bottom:0;width:40px;background:#f1f5f9;border-right:1px solid #e2e8f0;z-index:1;overflow:hidden;display:flex;flex-direction:column;align-items:flex-end;padding:12px 8px 12px 0;gap:0;font-family:monospace;font-size:13px;color:#4a5568;line-height:1.6"></div>
           <textarea id="ped-code" spellcheck="false" style="position:absolute;top:0;left:40px;right:0;bottom:0;background:#fafafa;border:none;color:#1e293b;font-family:'Cascadia Code','Fira Code','Courier New',monospace;font-size:13px;padding:12px 16px;outline:none;resize:none;line-height:1.6;tab-size:2;white-space:pre;overflow:auto" placeholder="// 코드를 작성하세요&#10;// 좌측 API 참조를 클릭하면 자동으로 입력됩니다" oninput="updateLineNums(this)" onkeydown="handleEditorKey(event)"></textarea>
         </div>
         <!-- 출력 영역 -->
@@ -1435,9 +1489,9 @@ hr.div{border:none;border-top:1px solid #f1f5f9;margin:16px 0;}
 </div></div>
 
 <script>
-/* ═══════════════════════════════════════════
+/* ===========================================
    CONFIG
-═══════════════════════════════════════════ */
+=========================================== */
 
 const DQUESTS=[
   {id:1,title:'독서 퀘스트',desc:'이번 주 책 1권 읽고 독후감 제출',reward:300,prog:0,total:1,status:'active'},
@@ -1484,7 +1538,7 @@ const SUPER_EMAIL='rladnwns67@gmail.com';
 // SUPER_PW는 클라이언트에 저장하지 않음 — DB role 확인으로 대체
 let MAINTENANCE_MODE=false;
 
-/* ── 파산 제한 설정 ──────────────────────────────
+/* -- 파산 제한 설정 ------------------------------
    선생님이 활성화하면 잔액 < 0 인 학생은
    퀘스트·주급 수령 외 모든 경제 활동 차단          */
 let BANKRUPT_RESTRICT=false; // 선생님이 켜/끄는 옵션
@@ -1537,6 +1591,7 @@ async function toggleBankruptRestrict(){
 }
 
 let SB=null,CU=null,CP=null;
+let _syncCoinWriting=false; // DB 쓰기 중 플래그 (전역 선언)
 let boardWidgets=[],selW=null;
 let edDragEl=null,edDragOX=0,edDragOY=0;
 let rszEl=null,rszSX=0,rszSY=0,rszSW=0,rszSH=0;
@@ -1548,34 +1603,69 @@ let pluginData=[];
 let curCh='general';
 window.CW_SB=null;window.CW_USER=null;
 
-/* ═══════════════════════════════════════════
+/* ===========================================
    CUSTOM SELECT
-═══════════════════════════════════════════ */
+=========================================== */
 function csToggle(id){
   const wrap=document.getElementById(id);
+  if(!wrap)return;
   const btn=wrap.querySelector('.cs-btn');
   const drop=wrap.querySelector('.cs-drop');
+  if(!btn||!drop)return;
   const isOpen=btn.classList.contains('open');
-  document.querySelectorAll('.cs-btn.open').forEach(b=>{b.classList.remove('open');b.nextElementSibling.classList.remove('on');});
-  if(!isOpen){btn.classList.add('open');drop.classList.add('on');}
+  // 다른 드롭다운 모두 닫기
+  document.querySelectorAll('.cs-btn.open').forEach(b=>{
+    b.classList.remove('open');
+    const d=b.closest('.cs')?.querySelector('.cs-drop');
+    if(d){d.classList.remove('on');d.style.display='none';}
+  });
+  if(!isOpen){
+    btn.classList.add('open');
+    drop.style.display='block';
+    // fixed 위치 계산 (overflow:hidden 부모에서도 잘리지 않도록)
+    requestAnimationFrame(()=>{
+      const rect=btn.getBoundingClientRect();
+      const dh=drop.offsetHeight||120;
+      const spaceBelow=window.innerHeight-rect.bottom;
+      drop.style.left=rect.left+'px';
+      drop.style.width=Math.max(rect.width,160)+'px';
+      if(spaceBelow<dh+8&&rect.top>dh+8){
+        drop.style.top='auto';
+        drop.style.bottom=(window.innerHeight-rect.top+4)+'px';
+      } else {
+        drop.style.bottom='auto';
+        drop.style.top=(rect.bottom+4)+'px';
+      }
+      drop.classList.add('on');
+    });
+  }
 }
 function csSelect(id,val,label,el){
   const wrap=document.getElementById(id);
+  if(!wrap)return;
   wrap.querySelector('.cs-val').textContent=label;
   wrap.querySelector('.cs-btn').dataset.val=val;
   wrap.querySelectorAll('.cs-opt').forEach(o=>o.classList.toggle('sel',o===el));
-  csToggle(id);// close
+  // 드롭다운 닫기
+  const drop=wrap.querySelector('.cs-drop');
+  const btn=wrap.querySelector('.cs-btn');
+  if(drop){drop.classList.remove('on');drop.style.display='none';}
+  if(btn)btn.classList.remove('open');
+  void 0;// close
   if(id==='cs-role'){const cf=document.getElementById('code-fg');if(cf)cf.style.display=val==='student'?'flex':'none';}
 }
 document.addEventListener('click',e=>{
   if(!e.target.closest('.cs')){
-    document.querySelectorAll('.cs-btn.open').forEach(b=>{b.classList.remove('open');b.nextElementSibling.classList.remove('on');});
+    document.querySelectorAll('.cs-btn.open').forEach(b=>{
+      b.classList.remove('open');
+      const d=b.closest('.cs')?.querySelector('.cs-drop');
+      if(d){d.classList.remove('on');d.style.display='none';}});
   }
 });
 
-/* ═══════════════════════════════════════════
+/* ===========================================
    INIT
-═══════════════════════════════════════════ */
+=========================================== */
 async function init(){
   setLdMsg('Supabase 연결 중...');
   // supabase 라이브러리 로드 대기
@@ -1590,22 +1680,24 @@ async function init(){
   }
   try{
     SB=supabase.createClient(SB_URL,SB_KEY,{
-      auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,storageKey:'cw-auth-token',storage:window.localStorage}
+      auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,storageKey:'cw_sb_session',storage:window.localStorage}
     });
     window.CW_SB=SB;
-
-  // ── 세션 자동 갱신 & 로그아웃 감지 ──
-  SB.auth.onAuthStateChange(async(event,session)=>{
-    if(event==='SIGNED_IN'||event==='TOKEN_REFRESHED'){
-      if(session?.user){CU=session.user;window.CW_USER=CU;}
-    }else if(event==='SIGNED_OUT'){
-      CU=null;CP=null;window.CW_USER=null;
-      if(document.getElementById('app').classList.contains('on')){
-        document.getElementById('app').classList.remove('on');
-        showAuth();
+    // 세션 변경 감지 (토큰 만료 자동 갱신 대응)
+    SB.auth.onAuthStateChange((event,session)=>{
+      if((event==='SIGNED_IN'||event==='INITIAL_SESSION')&&session){
+        if(!CU){CU=session.user;window.CW_USER=CU;}
+      } else if(event==='TOKEN_REFRESHED'&&session){
+        CU=session.user;window.CW_USER=CU;
+        if(CP&&!CP._isGuest&&CP.id!=='demo'){loadCP().catch(()=>{});}
+      } else if(event==='SIGNED_OUT'){
+        CU=null;CP=null;window.CW_USER=null;
+        if(document.getElementById('app')?.classList.contains('on')){
+          document.getElementById('app').classList.remove('on');
+          showAuth();
+        }
       }
-    }
-  });
+    });
   }catch(e){
     console.error('Supabase 클라이언트 생성 실패:',e);
     hideLd();demoMode();return;
@@ -1618,11 +1710,10 @@ async function init(){
     const session=data?.session;
     if(session){
       CU=session.user;window.CW_USER=CU;
-      // 만료 5분 이내일 때만 갱신
-      const _exp=session.expires_at;
-      if(_exp&&(Math.floor(Date.now()/1000)>(_exp-300))){
-        try{const{data:ref}=await SB.auth.refreshSession();if(ref?.session){CU=ref.session.user;window.CW_USER=CU;}}catch(_){}
-      }
+      try{
+        const{data:ref}=await SB.auth.refreshSession();
+        if(ref?.session){CU=ref.session.user;window.CW_USER=CU;}
+      }catch(_){}
       setLdMsg('프로필 로드 중...');
       try{
         await loadCP();
@@ -1685,9 +1776,9 @@ function demoMode(){
   showApp();
 }
 
-/* ═══════════════════════════════════════════
+/* ===========================================
    AUTH
-═══════════════════════════════════════════ */
+=========================================== */
 function switchAuthTab(t){
   // 탭 버튼 스타일
   const lBtn=document.getElementById('tab-login');
@@ -1755,7 +1846,7 @@ async function doReg(){
   try{
     if(!SB)throw new Error('Supabase 연결 실패');
 
-    // ── STEP 1: 학급 코드 먼저 검증 (signUp 전에!)
+    // -- STEP 1: 학급 코드 먼저 검증 (signUp 전에!)
     let classId=null;
     let className='';
     if(role==='student'){
@@ -1774,7 +1865,7 @@ async function doReg(){
       className=cl.name;
     }
 
-    // ── STEP 2: Auth signUp (코드 검증 통과 후)
+    // -- STEP 2: Auth signUp (코드 검증 통과 후)
     const{data,error}=await SB.auth.signUp({
       email:em, password:pw,
       options:{data:{name:nm,role}}
@@ -1791,10 +1882,10 @@ async function doReg(){
     if(!data?.user)throw new Error('계정 생성 실패');
     const uid=data.user.id;
 
-    // ── STEP 3: 로그인해서 세션 확보
+    // -- STEP 3: 로그인해서 세션 확보
     const{data:signinData,error:signinErr}=await SB.auth.signInWithPassword({email:em,password:pw});
 
-    // ── STEP 4: profiles 저장
+    // -- STEP 4: profiles 저장
     const profileData={
       id:uid, name:nm, role, email:em,
       balance:role==='teacher'?99999:500,
@@ -1811,11 +1902,11 @@ async function doReg(){
         await SB.from('profiles').update({
           name:nm, role, class_id:classId, class_name:className||null,
           balance:role==='teacher'?99999:500
-        }).eq('id',uid).catch(()=>{});
+        }).eq('id',uid);
       }
     }
 
-    // ── STEP 5: 완료
+    // -- STEP 5: 완료
     if(!signinErr&&signinData?.session){
       CU=signinData.user;
       await loadCP();
@@ -1871,8 +1962,8 @@ function guestLogin(type){
 }async function loadCP(){
   if(!SB||!CU)return;
   try{
-    const{data,error}=await SB.from('profiles').select('*').eq('id',CU.id).maybeSingle();
-    if(data&&!error){
+    const{data,error}=await SB.from('profiles').select('*').eq('id',CU.id).single();
+    if(data){
       CP=data;
       // DB 컬럼명(snake_case) → JS 필드명(camelCase) 매핑
       if(CP.equipped_avatar!==undefined){ CP.equippedAvatar=CP.equipped_avatar||null; }
@@ -1891,22 +1982,7 @@ function guestLogin(type){
       if(CP.equippedBanner===undefined)CP.equippedBanner=null;
       if(!CP.bio)CP.bio='';
       if(!CP.account_number)CP.account_number=genAcc();
-      // 플러그인 데이터 복원 (Supabase → 로컬)
-      if(Array.isArray(CP.user_plugins)&&CP.user_plugins.length){
-        userPlugins=CP.user_plugins;
-        try{localStorage.setItem('cw_user_plugins',JSON.stringify(userPlugins));}catch(_){}
-      }
-      if(Array.isArray(CP.installed_plugins)&&CP.installed_plugins.length){
-        installedSet=new Set(CP.installed_plugins);
-        try{localStorage.setItem('cw_installed',JSON.stringify([...installedSet]));}catch(_){}
-      }
-      // plugin_data 복원 (플러그인 런타임 저장 데이터)
-      if(CP.plugin_data&&typeof CP.plugin_data==='object'){
-        Object.entries(CP.plugin_data).forEach(([k,v])=>{
-          try{localStorage.setItem('plg_'+k,JSON.stringify(v));}catch(_){}
-        });
-      }
-    } else if(!error || error.code === 'PGRST116') {
+    } else {
       // profile 없음 → 자동 생성 (트리거 없는 경우 대비)
       const meta=CU.user_metadata||{};
       const isSuper=CU.email===SUPER_EMAIL;
@@ -1927,7 +2003,7 @@ function guestLogin(type){
         stockHoldings:{}
       };
       // 자동 profile 생성 시도
-      await SB.from('profiles').upsert(newCP,{onConflict:'id'}).then(()=>{}).catch(()=>{});
+      await sbSave(SB.from('profiles').upsert(newCP,{onConflict:'id'}),'프로필 초기화');
       CP=newCP;
     }
   }catch(e){
@@ -1950,9 +2026,9 @@ function guestLogin(type){
   if(CU.email===SUPER_EMAIL)CP.role='superadmin';
   if(CU.email===DEV_EMAIL&&CP.role==='student')CP.role='dev';
 }
-/* ═══════════════════════════════════════════
+/* ===========================================
    SUPABASE 실시간 연동
-═══════════════════════════════════════════ */
+=========================================== */
 let _realtimeChannels=[];
 
 function initRealtimeSubscriptions(){
@@ -2064,7 +2140,7 @@ function initRealtimeSubscriptions(){
     const msgCh=SB.channel('chat_'+CP.class_id)
       .on('postgres_changes',{event:'INSERT',schema:'public',table:'channel_messages',filter:'class_id=eq.'+CP.class_id},(payload)=>{
         const d=payload.new;
-        if(!d||d.author_id===CU?.id)return; // 내 메시지는 이미 표시됨
+        if(!d||d.author_id===CU.id)return; // 내 메시지는 이미 표시됨
         const chId=d.channel_id||'general';
         if(!DSC_MSGS[chId])DSC_MSGS[chId]=[];
         const rtCol=`hsl(${(d.author_name||'').split('').reduce((a,c)=>a+c.charCodeAt(0),0)%360},55%,45%)`;
@@ -2093,6 +2169,37 @@ function initRealtimeSubscriptions(){
     }).subscribe();
   _realtimeChannels.push(shopCh);
 
+  // 6. board_posts 실시간 (학급 게시판)
+  if(CP.class_id){
+    const boardCh=SB.channel('board_posts_'+CP.class_id)
+      .on('postgres_changes',{event:'INSERT',schema:'public',table:'board_posts',filter:'class_id=eq.'+CP.class_id},(payload)=>{
+        const d=payload.new;
+        if(!d||d.author_id===CU.id)return;
+        const col='hsl('+(d.author_name||'').split('').reduce((a,c)=>a+c.charCodeAt(0),0)%360+',55%,45%)';
+        const newPost={id:d.id,author:d.author_name||'학생',role:'student',col,
+          txt:d.content||'',img:d.image_url||null,
+          ts:new Date(d.created_at).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}),
+          likes:[],comments:[]};
+        boardPosts.push(newPost);
+        if(boardMode==='board'){
+          const pc=document.getElementById('posts-container');
+          if(pc)pc.insertAdjacentHTML('afterbegin',renderPost(newPost));
+        }
+      }).subscribe();
+    _realtimeChannels.push(boardCh);
+  }
+
+  // 7. transactions 실시간 (내 입금 알림)
+  const txCh=SB.channel('my_tx_'+CU.id)
+    .on('postgres_changes',{event:'INSERT',schema:'public',table:'transactions',filter:'to_id=eq.'+CU.id},(payload)=>{
+      const d=payload.new;
+      if(!d||d.from_id===CU.id)return;
+      const typeL={reward:'보상',salary:'급여',loan:'대출',transfer:'송금',stock_buy:'주식 매수',stock_sell:'주식 매도',purchase:'구매',tax:'세금',save:'저금'};
+      const label=typeL[d.type]||d.description||'입금';
+      if((d.amount||0)>0)toast('+'+(d.amount||0).toLocaleString()+' CC ('+label+')','s');
+    }).subscribe();
+  _realtimeChannels.push(txCh);
+
   console.log('🔴 실시간 구독 시작:', _realtimeChannels.length, '채널');
 }
 
@@ -2109,9 +2216,9 @@ async function doLogout(){
   showAuth();
 }
 
-/* ═══════════════════════════════════════════
+/* ===========================================
    APP SETUP
-═══════════════════════════════════════════ */
+=========================================== */
 function showApp(){
   if(!CP)CP={name:'사용자',role:'student',balance:0,credit_grade:'C',credit_score:500,job:'학생',is_suspended:false,account_number:'0000-0000'};
   if(!CP.inventory)        CP.inventory=[];
@@ -2145,7 +2252,7 @@ function showApp(){
       localStorage.setItem('cw_school',JSON.stringify({officeCode:CP.office_code,schoolCode:CP.school_code,schoolName:CP.school||''}));
     } else {
       // Supabase에 없으면 localStorage에서 복원
-      const sc=(()=>{try{return JSON.parse(localStorage.getItem('cw_school')||'null');}catch(_){return null;}})();
+      const sc=JSON.parse((()=>{try{return localStorage.getItem('cw_school');}catch(_){return null;}})())||null;
       if(sc){
         window._niceOfficeCode=sc.officeCode;
         window._niceSchoolCode=sc.schoolCode;
@@ -2154,21 +2261,14 @@ function showApp(){
         CP.school_code=sc.schoolCode;
         // Supabase에도 소급 저장
         if(SB&&CU){
-          SB.from('profiles').update({school:sc.schoolName||CP.school||''}).eq('id',CU.id).then(()=>{}).catch(()=>{});
+          sbSave(SB.from('profiles').update({school:sc.schoolName||CP.school||'',office_code:sc.officeCode,school_code:sc.schoolCode}).eq('id',CU.id),'학교 저장');
         }
       }
     }
   }catch(_){}
-  // 각 초기화 함수를 독립 try/catch로 실행 - 하나가 실패해도 나머지 계속
-  const _safeRun=(fn,nm)=>{try{fn();}catch(e){console.warn('[showApp] '+nm+' 오류:',e.message);}};
-  _safeRun(loadBoardData,'loadBoardData');
-  _safeRun(buildNav,'buildNav');
-  _safeRun(buildSidebar,'buildSidebar');
-  _safeRun(syncCoin,'syncCoin');
-  _safeRun(loadDash,'loadDash');
-  _safeRun(initStocks,'initStocks');
-  if(typeof initChatAutoClean==='function')_safeRun(initChatAutoClean,'initChatAutoClean');
-  _safeRun(updateNavAvatar,'updateNavAvatar');
+  loadBoardData();buildNav();buildSidebar();syncCoin();loadDash();initStocks();if(typeof initChatAutoClean==='function')initChatAutoClean();updateNavAvatar();
+  // Supabase에서 플러그인 데이터 로드
+  if(typeof loadPluginsFromSB==='function')loadPluginsFromSB();
   // classes.settings 에서 저장된 설정 복원
   if(SB&&CP?.class_id){
     SB.from('classes').select('settings').eq('id',CP.class_id).single().then(({data})=>{
@@ -2184,24 +2284,23 @@ function showApp(){
         const neis=schedEvents.filter(e=>e.neis);
         schedEvents=[...s.schedEvents.filter(e=>!e.neis),...neis];
       }
-      // 시간 제한 복원
-      if(s.timeRestrict){
-        window._savedTimeRestrict=s.timeRestrict;
-      }
-      // 수업 메시지 복원
-      if(s.classMsg){
-        window._savedClassMsg=s.classMsg;
-      }
-      // 공동구매 데이터 복원
-      if(s.groupBuyData&&typeof s.groupBuyData==='object'){
-        groupBuyData=s.groupBuyData;
-      }
-    }).catch(()=>{});
+    }).then(()=>{},()=>{});
   }
-  _safeRun(initRealtimeSubscriptions,'initRealtimeSubscriptions');
+  initRealtimeSubscriptions();
+  // 공지 Supabase에서 로드
+  if(SB&&CP?.class_id&&CP?.id!=='demo'&&!CP?._isGuest){
+    SB.from('notices').select('id,title,content,created_at').eq('class_id',CP.class_id).order('created_at',{ascending:false}).limit(10)
+      .then(({data})=>{
+        if(data&&data.length){
+          window._notices=data.map(n=>({id:n.id,t:n.title,b:n.content||'',d:new Date(n.created_at).toLocaleDateString('ko-KR'),lvl:'normal'}));
+          window._notices._loaded=CP.class_id;
+          if(document.getElementById('notices'))renderNotices();
+        }
+      }).catch(()=>{});
+  }
 }
 
-/* ── 학교/학급 셋업 ── */
+/* -- 학교/학급 셋업 -- */
 function showClassSetup(){
   const existing=document.getElementById('md-class-setup');
   if(existing)existing.remove();
@@ -2298,7 +2397,7 @@ function buildNav(){
   const pill=document.getElementById('role-pill');
   pill.textContent=rmap[r]||r;
   pill.className='role-pill '+(rcls[r]||'rp-s');
-  document.getElementById('nav-av').textContent=(CP.name||'?')[0].toUpperCase();
+  const _navAv=document.getElementById('nav-av');if(_navAv)_navAv.textContent=(CP.name||'?')[0].toUpperCase();
   if(r!=='student')document.getElementById('nav-coin').style.opacity='0.7';
   // 학급명 표시
   const clsBadge=document.getElementById('nav-class-badge');
@@ -2355,9 +2454,9 @@ function sgrp(lbl,items){return`<div class="sb-grp"><div class="sb-lbl">${lbl}</
 
 function updateCoin(){syncCoin();}
 
-/* ═══════════════════════════════════════════
+/* ===========================================
    ROUTING
-═══════════════════════════════════════════ */
+=========================================== */
 function goPage(id){
   const isBoard=id==='pg-board';
   const isFullPage=['pg-quests'].includes(id);
@@ -2367,42 +2466,15 @@ function goPage(id){
   // board-area 비우기 (다른 페이지 이동 시 잔재 제거)
   if(!isBoard){const ba=document.getElementById('board-area');if(ba)ba.innerHTML='';}
   if(cnt){
-    if(isBoard){
-      cnt.style.display='none';
-    } else if(isFullPage){
-      cnt.style.display='flex';
-      cnt.style.flexDirection='column';
-      cnt.style.padding='0';
-      cnt.style.maxWidth='100%';
-      cnt.style.overflow='hidden';
-      cnt.style.height='100%';
-    } else {
-      cnt.style.display='block';
-      cnt.style.flexDirection='';
-      cnt.style.padding='';
-      cnt.style.maxWidth='';
-      cnt.style.overflow='';
-      cnt.style.height='';
-    }
+    cnt.style.display=isBoard?'none':'block';
+    if(isFullPage){cnt.style.padding='0';cnt.style.maxWidth='100%';}
+    else{cnt.style.padding='';cnt.style.maxWidth='';}
   }
   if(board)board.style.display=isBoard?'flex':'none';
   // 일반 페이지 전환
   if(!isBoard){
-    document.querySelectorAll('.page').forEach(p=>{
-      p.classList.remove('on');
-      p.style.height='';
-      p.style.display='';
-    });
-    const pg=document.getElementById(id);
-    if(pg){
-      pg.classList.add('on');
-      if(isFullPage){
-        pg.style.display='flex';
-        pg.style.flexDirection='column';
-        pg.style.height='100%';
-        pg.style.flex='1';
-      }
-    }
+    document.querySelectorAll('.page').forEach(p=>p.classList.remove('on'));
+    const pg=document.getElementById(id);if(pg)pg.classList.add('on');
   }
   // nav/sidebar 활성
   document.querySelectorAll('.nl').forEach(b=>b.classList.toggle('on',b.getAttribute('onclick')?.includes(id)));
@@ -2410,15 +2482,15 @@ function goPage(id){
   const loaders={
     'pg-econ':loadEcon,'pg-shop':loadShop,'pg-quests':loadQuests,
     'pg-jobs':loadJobs,'pg-credit':loadCredit,'pg-admin':()=>admTab('students',null),
-    'pg-dev':()=>devTab('stats',null),'pg-comm':loadComm,'pg-board':loadBoard,
+    'pg-dev':()=>devTab('users',null),'pg-comm':loadComm,'pg-board':loadBoard,
     'pg-rank':loadRanking,'pg-meal':loadMeal,'pg-schedule':loadSchedule,
   };
   loaders[id]?.();
 }
 
-/* ═══════════════════════════════════════════
+/* ===========================================
    DASHBOARD
-═══════════════════════════════════════════ */
+=========================================== */
 async function loadDash(){
   if(!CP)return;
   await loadDSTU();
@@ -2472,7 +2544,7 @@ async function loadDash(){
       if(cc)cc.textContent=stus.reduce((a,s)=>a+(s.balance||0),0).toLocaleString();
       const rc=document.getElementById('r-cnt');
       if(rc)rc.textContent=stus.filter(s=>s.credit_grade==='D').length;
-    }).catch(()=>{});
+    }).then(()=>{},()=>{});
     // quests는 로컬 데이터 사용
     const qEl=document.getElementById('q-cnt');
     if(qEl)qEl.textContent=(questData?.length||DQUESTS?.filter(q=>q.status==='active'||!q.status).length||0);
@@ -2506,77 +2578,42 @@ async function loadDash(){
       <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1.5 2h2l2 5.5h5l1.5-4H4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="5" cy="10" r="1" fill="currentColor"/><circle cx="9" cy="10" r="1" fill="currentColor"/></svg>
       상점
     </button>`:'';
-  renderFeed();
-  // Supabase에서 공지 로드
-  if(SB&&CP?.class_id&&CP?.id!=='demo'&&!CP?._isGuest){
-    SB.from('notices')
-      .select('id,title,content,created_at')
-      .eq('class_id',CP.class_id)
-      .order('created_at',{ascending:false})
-      .limit(10)
-      .then(({data})=>{
-        if(data&&data.length){
-          window._notices=data.map(n=>({
-            id:n.id,t:n.title||'',b:n.content||'',
-            d:new Date(n.created_at).toLocaleDateString('ko-KR',{month:'2-digit',day:'2-digit'}),
-            lvl:'normal'
-          }));
-        }
-        renderNotices();
-      }).catch(()=>renderNotices());
-    // 학생: 완료 퀘스트 수 로드
-    if(CP.role==='student'){
-      SB.from('quest_completions')
-        .select('id',{count:'exact',head:true})
-        .eq('user_id',CU.id)
-        .eq('status','approved')
-        .then(({count})=>{
-          const el=document.querySelector('#dash-stats .stat:nth-child(4) .stat-v');
-          // 완료 퀘스트 stat은 4번째 stat (학생용)
-          const statEls=document.querySelectorAll('#dash-stats .stat');
-          statEls.forEach(s=>{if(s.querySelector('.stat-l')?.textContent?.includes('완료 퀘스트')){s.querySelector('.stat-v').textContent=count||0;}});
-        }).catch(()=>{});
-    }
-  } else {
-    renderNotices();
-  }
+  renderFeed();renderNotices();
 }
 function renderFeed(){
-  const el=document.getElementById('feed');
-  if(!el)return;
-  // 더미 row (fallback)
-  const dummyRows=[
-    {bg:'var(--blue6)',ico:'<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5.5" stroke="#1d4ed8" stroke-width="1.3"/><path d="M4 6.5l2 2 3.5-4" stroke="#1d4ed8" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',t:'<b>퀘스트 완료</b> 수학 숙제 제출 → <span style="color:var(--green);font-weight:700;">+200 CC</span>',ts:'방금 전'},
-    {bg:'var(--gbg)',ico:'<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M1.5 2h2l2 6.5h5l1.5-4H4" stroke="#15803d" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',t:'<b>상점 구매</b> 자유 좌석권 → <span style="color:var(--red);font-weight:700;">-150 CC</span>',ts:'10분 전'},
-  ];
-  // Supabase에서 최근 활동 로드
+  const feedEl=document.getElementById('feed');
+  if(!feedEl)return;
+  feedEl.innerHTML='<div style="color:#94a3b8;font-size:13px;padding:14px;text-align:center">불러오는 중...</div>';
   if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest){
-    SB.from('transactions')
-      .select('id,amount,type,description,created_at')
-      .or(`from_id.eq.${CU.id},to_id.eq.${CU.id}`)
-      .order('created_at',{ascending:false})
-      .limit(8)
+    SB.from('transactions').select('*').or('from_id.eq.'+CU.id+',to_id.eq.'+CU.id).order('created_at',{ascending:false}).limit(8)
       .then(({data})=>{
-        if(!data||!data.length){el.innerHTML=dummyRows.map(r=>`<div class="feed-row"><div class="feed-ico" style="background:${r.bg}">${r.ico}</div><div class="feed-txt">${r.t}</div><div class="feed-time">${r.ts}</div></div>`).join('');return;}
-        const typeIco={
-          reward:'<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5.5" stroke="#1d4ed8" stroke-width="1.3"/><path d="M4 6.5l2 2 3.5-4" stroke="#1d4ed8" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-          transfer:'<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M1 6.5h11M8 3l3.5 3.5L8 10" stroke="#6d28d9" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-          purchase:'<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M1.5 2h2l2 6.5h5l1.5-4H4" stroke="#15803d" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-          stock:'<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M1.5 10l3-4.5 3 2.5 4-6" stroke="#6d28d9" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-          deduct:'<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M1 6.5h11" stroke="#dc2626" stroke-width="1.4" stroke-linecap="round"/></svg>',
-        };
-        const typeBg={reward:'var(--blue6)',transfer:'var(--pbg)',purchase:'var(--gbg)',stock:'var(--pbg)',deduct:'var(--rbg)'};
-        const typeLabel={reward:'보상 지급',transfer:'코인 이동',purchase:'상점 구매',stock:'주식 거래',deduct:'차감',tax:'세금'};
-        el.innerHTML=data.map(tx=>{
-          const isIncome=tx.amount>0;
-          const relTime=(()=>{const d=new Date(tx.created_at);const n=new Date();const s=Math.round((n-d)/1000);if(s<60)return '방금 전';if(s<3600)return Math.round(s/60)+'분 전';if(s<86400)return Math.round(s/3600)+'시간 전';return Math.round(s/86400)+'일 전';})();
-          return `<div class="feed-row"><div class="feed-ico" style="background:${typeBg[tx.type]||'var(--bg4)'}">${typeIco[tx.type]||typeIco.reward}</div><div class="feed-txt"><b>${typeLabel[tx.type]||tx.type}</b> ${escHtml(tx.description||'')} → <span style="color:${isIncome?'var(--green)':'var(--red)'};font-weight:700;">${isIncome?'+':''}${(tx.amount||0).toLocaleString()} CC</span></div><div class="feed-time">${relTime}</div></div>`;
+        if(!data||!data.length){
+          feedEl.innerHTML='<div class="feed-row"><div class="feed-txt" style="color:#94a3b8;padding:8px">최근 활동이 없어요</div></div>';
+          return;
+        }
+        const typeBg={reward:'var(--gbg)',purchase:'var(--rbg)',transfer:'var(--blue6)',stock:'var(--pbg)',salary:'var(--abg)',loan:'var(--blue5)',tax:'var(--abg)'};
+        const typeLabel={reward:'퀘스트 보상',purchase:'구매',transfer:'송금',stock:'주식',stock_buy:'주식 매수',stock_sell:'주식 매도',salary:'급여',loan:'대출',tax:'세금',save:'저금'};
+        feedEl.innerHTML=data.map(t=>{
+          const isIn=t.to_id===CU.id&&t.from_id!==CU.id;
+          const amt=(t.amount||0);
+          const sign=isIn?'+':'-';
+          const col=isIn?'var(--green)':'var(--red)';
+          const d=new Date(t.created_at);
+          const now=new Date();
+          const diffMin=Math.floor((now-d)/60000);
+          const ts=diffMin<1?'방금 전':diffMin<60?diffMin+'분 전':diffMin<1440?Math.floor(diffMin/60)+'시간 전':Math.floor(diffMin/1440)+'일 전';
+          const bg=typeBg[t.type]||'var(--bg3)';
+          const label=typeLabel[t.type]||t.type||'기타';
+          return '<div class="feed-row"><div class="feed-ico" style="background:'+bg+'">📋</div><div class="feed-txt"><b>'+escHtml(t.description||label)+'</b> → <span style="color:'+col+';font-weight:700;">'+sign+Math.abs(amt).toLocaleString()+' CC</span></div><div class="feed-time">'+ts+'</div></div>';
         }).join('');
-      }).catch(()=>{el.innerHTML=dummyRows.map(r=>`<div class="feed-row"><div class="feed-ico" style="background:${r.bg}">${r.ico}</div><div class="feed-txt">${r.t}</div><div class="feed-time">${r.ts}</div></div>`).join('');});
+      }).catch(()=>{
+        feedEl.innerHTML='<div class="feed-row"><div class="feed-txt" style="color:#94a3b8;padding:8px">최근 활동을 불러올 수 없어요</div></div>';
+      });
   } else {
-    el.innerHTML=dummyRows.map(r=>`<div class="feed-row"><div class="feed-ico" style="background:${r.bg}">${r.ico}</div><div class="feed-txt">${r.t}</div><div class="feed-time">${r.ts}</div></div>`).join('');
+    feedEl.innerHTML='<div class="feed-row"><div class="feed-ico" style="background:var(--gbg)">✅</div><div class="feed-txt"><b>퀘스트 완료</b> 샘플 데이터 → <span style="color:var(--green);font-weight:700;">+200 CC</span></div><div class="feed-time">샘플</div></div>';
   }
 }
+
 function renderNotices(){
   const items=window._notices?.length?window._notices.map(n=>({t:n.t,b:n.b,d:n.d,lvl:n.lvl})):[
     {t:'이번 주 IT 주식 강세',b:'GAMER, TECH 종목 주목!',d:'2시간 전',lvl:'normal'},
@@ -2593,10 +2630,10 @@ function renderNotices(){
   </div>`).join('');
 }
 
-/* ═══════════════════════════════════════════
+/* ===========================================
    ECONOMY (Real Stock API)
-═══════════════════════════════════════════ */
-/* ══ ECON TAB SYSTEM ══════════════════════════════════════ */
+=========================================== */
+/* == ECON TAB SYSTEM ====================================== */
 let econTabMode='bank';
 // 세금 데이터
 let taxRules=[
@@ -2646,7 +2683,14 @@ function collectTax(ruleId,auto=false){
     const all=[{nm:CP.name,bal:CP.balance},...DSTU].sort((a,b)=>b.bal-a.bal);
     const topN=Math.ceil(all.length*0.2);
     all.slice(0,topN).forEach(s=>{
-      if(s.nm===CP.name){const amt=Math.floor((CP.balance||0)*rule.rate/100);CP.balance=Math.max(0,(CP.balance||0)-amt);syncCoin();collected+=amt;}
+      if(s.nm===CP.name){
+        const amt=Math.floor((CP.balance||0)*rule.rate/100);
+        CP.balance=Math.max(0,(CP.balance||0)-amt);
+        syncCoin();collected+=amt;
+        if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest&&amt>0){
+          SB.from('transactions').insert({from_id:CU.id,to_id:CU.id,amount:-amt,type:'tax',description:`${rule.name||'세금'} 납부`,class_id:CP.class_id||null}).then(()=>{},()=>{});
+        }
+      }
       else{const t=DSTU.find(x=>x.nm===s.nm);if(t){const amt=Math.floor(t.bal*rule.rate/100);t.bal=Math.max(0,t.bal-amt);collected+=amt;}}
     });
   }
@@ -2654,7 +2698,7 @@ function collectTax(ruleId,auto=false){
   const ts=new Date().toLocaleString('ko-KR',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
   taxHistory.unshift({rule:rule.name,rate:rule.rate,collected,ts,auto});
   if(SB&&CU&&CP.class_id&&collected>0){
-    SB.from('transactions').insert({from_id:CU.id,to_id:CU.id,amount:-collected,type:'tax',description:`세금 징수: ${rule.name} (${rule.rate}%)`,class_id:CP.class_id}).then(()=>{}).catch(()=>{});
+    SB.from('transactions').insert({from_id:CU.id,to_id:CU.id,amount:-collected,type:'tax',description:`세금 징수: ${rule.name} (${rule.rate}%)`,class_id:CP.class_id}).then(()=>{},()=>{});
   }
   // 세금 규칙 저장
   if(SB&&CP?.class_id&&CP?.id!=='demo') mergeClassSettings({taxRules,taxHistory:taxHistory.slice(0,50)});
@@ -2674,6 +2718,7 @@ function econTab(tab, btn){
   const el=document.getElementById('econ-body');
   const acts=document.getElementById('econ-tab-acts');
   if(!el)return;
+  if(!acts)return;
 
   if(tab==='bank'){
     acts.innerHTML=`<div style="display:flex;gap:8px">
@@ -2706,7 +2751,7 @@ function econTab(tab, btn){
   }
 }
 
-/* ── 은행 탭 ── */
+/* -- 은행 탭 -- */
 function renderBankTab(el){
   if(!CP)return;
   const _bankrupt=isBankrupt();
@@ -2800,11 +2845,40 @@ function renderBankTab(el){
       <div class="tw-title">최근 거래 내역</div>
       <button class="btn btn-g btn-xs" onclick="econTab('tx',document.querySelectorAll('#econ-tabs .admtab')[3])">전체보기</button>
     </div>
-    ${renderTxRows(5)}
-  </div>`;
+    <div id="tx-wrap-bank" style="min-height:60px">
+      <div class="tw-hdr"><div class="tw-title">최근 거래 내역</div><button class="btn btn-g btn-xs" onclick="econTab('tx',document.querySelectorAll('#econ-tabs .admtab')[3])">전체보기</button></div>
+      <div style="color:#94a3b8;font-size:13px;padding:12px;text-align:center">불러오는 중...</div>
+    </div>`;
+  setTimeout(renderBankRecentTx,100);
 }
 
-/* ── 주식 탭 ── */
+/* -- 은행 최근거래 비동기 로더 -- */
+async function renderBankRecentTx(){
+  const el=document.getElementById('tx-wrap-bank');
+  if(!el)return;
+  const makeHdr=()=>'<div class="tw-hdr"><div class="tw-title">최근 거래 내역</div><button class="btn btn-g btn-xs" onclick="econTab(\'tx\',document.querySelectorAll(\'#econ-tabs .admtab\')[3])">전체보기</button></div>';
+  if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest){
+    try{
+      const{data}=await SB.from('transactions').select('*').or('from_id.eq.'+CU.id+',to_id.eq.'+CU.id).order('created_at',{ascending:false}).limit(5);
+      if(data&&data.length){
+        const tl={reward:'보상',purchase:'구매',transfer:'송금',stock:'주식',stock_buy:'주식 매수',stock_sell:'주식 매도',salary:'급여',loan:'대출',tax:'세금',save:'저금',interest:'이자'};
+        const rows=data.map(t=>{
+          const isIn=t.to_id===CU.id&&t.from_id!==CU.id;
+          const d=new Date(t.created_at);
+          const ts=(d.getMonth()+1)+'/'+(d.getDate())+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+          const c=isIn?'var(--green)':'var(--red)';
+          const a=(t.amount||0);
+          return '<tr><td><div style="width:26px;height:26px;border-radius:8px;background:'+c+'18;display:flex;align-items:center;justify-content:center;font-size:13px">'+(isIn?'↑':'↓')+'</div></td><td style="font-size:12.5px">'+escHtml(t.description||tl[t.type]||t.type||'-')+'</td><td style="font-weight:700;color:'+c+'">'+(isIn?'+':'')+a.toLocaleString()+' CC</td><td style="font-size:11px;color:#94a3b8">'+ts+'</td></tr>';
+        }).join('');
+        el.innerHTML=makeHdr()+'<table><thead><tr><th></th><th>내용</th><th>금액</th><th>날짜</th></tr></thead><tbody>'+rows+'</tbody></table>';
+        return;
+      }
+    }catch(_){}
+  }
+  el.innerHTML=makeHdr()+'<div style="color:#94a3b8;font-size:13px;padding:12px;text-align:center">거래내역이 없어요</div>';
+}
+
+/* -- 주식 탭 -- */
 function renderStocksTab(el){
   const _bankruptStocks=isBankrupt();
   el.innerHTML=`
@@ -2829,7 +2903,7 @@ function renderStocksTab(el){
   renderStocks();
 }
 
-/* ── 세금 탭 ── */
+/* -- 세금 탭 -- */
 function renderTaxTab(el){
   const isTeacher=CP.role==='teacher'||CP.role==='dev'||CP.role==='superadmin';
   const totalCollected=taxHistory.reduce((a,t)=>a+t.collected,0);
@@ -2904,71 +2978,52 @@ function renderTaxTab(el){
   </div>`;
 }
 
-/* ── 거래내역 탭 ── */
+/* -- 거래내역 탭 -- */
 function renderTxTab(el){
-  el.innerHTML=`<div class="tw" id="tx-table-wrap"><div class="empty" style="padding:24px"><div style="width:32px;height:32px;border:3px solid var(--blue5);border-top-color:var(--blue);border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 10px"></div><div class="empty-t" style="font-size:12px">거래내역 불러오는 중...</div></div></div>`;
-  if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest){
-    SB.from('transactions')
-      .select('id,amount,type,description,created_at,from_id,to_id')
-      .or(`from_id.eq.${CU.id},to_id.eq.${CU.id}`)
-      .order('created_at',{ascending:false})
-      .limit(50)
-      .then(({data})=>{
-        const wrap=document.getElementById('tx-table-wrap');
-        if(!wrap)return;
-        if(!data||!data.length){wrap.innerHTML='<div class="empty"><div class="empty-t">거래내역 없음</div></div>';return;}
-        const typeStyle={reward:'#10b981',purchase:'#ef4444',stock:'#8b5cf6',salary:'#f59e0b',transfer:'#3b82f6',deduct:'#ef4444',loan:'#f59e0b',tax:'#8b5cf6'};
-        const typeLabel={reward:'보상',purchase:'구매',stock:'주식',salary:'급여',transfer:'송금',deduct:'차감',loan:'대출',tax:'세금'};
-        const typeIco={
-          reward:`<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6" stroke="#10b981" stroke-width="1.4"/><path d="M4.5 7l2 2 3.5-4" stroke="#10b981" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
-          purchase:`<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 2h2l2.5 7.5h5.5l1.5-4.5H4" stroke="#ef4444" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
-          stock:`<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1.5 11l3.5-5 3 3 3-5.5" stroke="#8b5cf6" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
-          transfer:`<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1.5 7h11M9.5 4l3 3-3 3" stroke="#3b82f6" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
-          deduct:`<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 7h10" stroke="#ef4444" stroke-width="1.4" stroke-linecap="round"/></svg>`,
-          loan:`<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="1.5" y="5" width="11" height="8" rx="1.5" stroke="#f59e0b" stroke-width="1.3"/></svg>`,
-          tax:`<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1.5l1.5 3 3.5.5-2.5 2.5.5 3.5L7 9.3l-3 1.7.5-3.5L2 5l3.5-.5z" stroke="#8b5cf6" stroke-width="1.2"/></svg>`,
-        };
-        const relTime=(d)=>{const s=Math.round((Date.now()-new Date(d))/1000);if(s<60)return '방금 전';if(s<3600)return Math.round(s/60)+'분 전';if(s<86400)return Math.round(s/3600)+'시간 전';return new Date(d).toLocaleDateString('ko-KR',{month:'2-digit',day:'2-digit'});};
-        wrap.innerHTML=`<table>
-          <thead><tr><th></th><th>내용</th><th>금액</th><th>날짜</th></tr></thead>
-          <tbody>
-            ${data.map(t=>{const isIncome=t.to_id===CU.id&&t.amount>0||t.type==='reward'||t.type==='salary'||t.type==='loan';const color=t.amount>=0&&(t.to_id===CU.id||t.type==='reward')?'#10b981':'#ef4444';return `<tr>
-              <td style="width:32px"><div style="width:28px;height:28px;border-radius:9px;background:${typeStyle[t.type]||'#94a3b8'}18;display:flex;align-items:center;justify-content:center">${typeIco[t.type]||typeIco.reward}</div></td>
-              <td><div style="font-size:13.5px;font-weight:600;color:#0f172a">${escHtml(t.description||t.type)}</div><div style="font-size:11px;color:#94a3b8;margin-top:1px">${typeLabel[t.type]||t.type}</div></td>
-              <td style="font-weight:800;font-size:14px;color:${color};white-space:nowrap">${t.amount>=0&&t.to_id===CU.id?'+':''}${(t.amount||0).toLocaleString()} CC</td>
-              <td style="font-size:12px;color:#94a3b8;white-space:nowrap">${relTime(t.created_at)}</td>
-            </tr>`;}).join('')}
-          </tbody>
-        </table>`;
-      }).catch(()=>{
-        const wrap=document.getElementById('tx-table-wrap');
-        if(wrap)wrap.innerHTML=`<div class="tw">${renderTxRowsFallback(50)}</div>`;
-      });
-  } else {
-    document.getElementById('tx-table-wrap').innerHTML=renderTxRowsFallback(50);
-  }
+  el.innerHTML='<div class="tw" id="tx-wrap"><div style="color:#94a3b8;font-size:13px;padding:16px;text-align:center">불러오는 중...</div></div>';
+  renderTx();
 }
-function renderTxRowsFallback(limit){
+function renderTxRows(limit){
   const txs=[
     {ico:'reward',d:'퀘스트 보상',a:+200,t:'오늘 오전 9:00'},
     {ico:'purchase',d:'상점 구매 (자유 좌석권)',a:-150,t:'오늘 오전 10:30'},
     {ico:'stock',d:'AAPL 2주 매도',a:+320,t:'어제 오후 2:15'},
+    {ico:'salary',d:'주급 지급 (반장)',a:+200,t:'어제 오전 9:00'},
     {ico:'transfer',d:'이서연에게 송금',a:-100,t:'2일 전'},
   ].slice(0,limit);
   const typeStyle={reward:'#10b981',purchase:'#ef4444',stock:'#8b5cf6',salary:'#f59e0b',transfer:'#3b82f6'};
-  const typeLabel={reward:'보상',purchase:'구매',stock:'주식',salary:'급여',transfer:'송금'};
+  const typeLabel={reward:'보상',purchase:'구매',stock:'주식',stock_buy:'주식 매수',stock_sell:'주식 매도',salary:'급여',loan:'대출',tax:'세금',save:'저금',transfer:'송금'};
   const typeIco={
     reward:`<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6" stroke="#10b981" stroke-width="1.4"/><path d="M4.5 7l2 2 3.5-4" stroke="#10b981" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
     purchase:`<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 2h2l2.5 7.5h5.5l1.5-4.5H4" stroke="#ef4444" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
     stock:`<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1.5 11l3.5-5 3 3 3-5.5" stroke="#8b5cf6" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+    salary:`<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1.5l1.4 2.8 3.1.45-2.24 2.18.53 3.07L7 8.46l-2.79 1.47.53-3.07L2.5 4.75l3.1-.45z" stroke="#f59e0b" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
     transfer:`<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1.5 7h11M9.5 4l3 3-3 3" stroke="#3b82f6" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  stock_buy:`<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><polyline points="1,10 4,6 7,8 11,3" stroke="#10b981" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><polyline points="9,3 11,3 11,5" stroke="#10b981" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  stock_sell:`<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><polyline points="1,4 4,8 7,6 11,11" stroke="#ef4444" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><polyline points="9,11 11,11 11,9" stroke="#ef4444" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  loan:`<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="1.5" y="3.5" width="11" height="7" rx="1.5" stroke="#f59e0b" stroke-width="1.4"/><path d="M5 7h4M7 5v4" stroke="#f59e0b" stroke-width="1.4" stroke-linecap="round"/></svg>`,
+  tax:`<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1.5L12.5 4.5v5L7 12.5 1.5 9.5v-5z" stroke="#8b5cf6" stroke-width="1.4"/><path d="M5 9l4-4M5 5h.01M9 9h.01" stroke="#8b5cf6" stroke-width="1.4" stroke-linecap="round"/></svg>`,
+  save:`<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="5.5" stroke="#0ea5e9" stroke-width="1.4"/><path d="M7 4.5v3l2 1" stroke="#0ea5e9" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   };
-  return `<table><thead><tr><th></th><th>내용</th><th>금액</th><th>날짜</th></tr></thead><tbody>
-    ${txs.map(t=>`<tr><td style="width:32px"><div style="width:28px;height:28px;border-radius:9px;background:${typeStyle[t.ico]}18;display:flex;align-items:center;justify-content:center">${typeIco[t.ico]||''}</div></td><td><div style="font-size:13.5px;font-weight:600;color:#0f172a">${t.d}</div><div style="font-size:11px;color:#94a3b8;margin-top:1px">${typeLabel[t.ico]}</div></td><td style="font-weight:800;font-size:14px;color:${t.a>=0?'#10b981':'#ef4444'};white-space:nowrap">${t.a>=0?'+':''}${t.a.toLocaleString()} CC</td><td style="font-size:12px;color:#94a3b8;white-space:nowrap">${t.t}</td></tr>`).join('')}
-  </tbody></table>`;
+  return `<table>
+    <thead><tr><th></th><th>내용</th><th>금액</th><th>날짜</th></tr></thead>
+    <tbody>
+      ${txs.map(t=>`<tr>
+        <td style="width:32px">
+          <div style="width:28px;height:28px;border-radius:9px;background:${typeStyle[t.ico]}18;display:flex;align-items:center;justify-content:center">${typeIco[t.ico]}</div>
+        </td>
+        <td>
+          <div style="font-size:13.5px;font-weight:600;color:#0f172a">${t.d}</div>
+          <div style="font-size:11px;color:#94a3b8;margin-top:1px">${typeLabel[t.ico]}</div>
+        </td>
+        <td style="font-weight:800;font-size:14px;color:${t.a>=0?'#10b981':'#ef4444'};white-space:nowrap">${t.a>=0?'+':''}${t.a.toLocaleString()} CC</td>
+        <td style="font-size:12px;color:#94a3b8;white-space:nowrap">${t.t}</td>
+      </tr>`).join('')}
+    </tbody>
+  </table>`;
 }
 
-/* ── 자산순위 탭 ── */
+/* -- 자산순위 탭 -- */
 function renderEconRankTab(el){
   const all=[
     {nm:CP.name||'나',bal:CP.balance||0,gr:CP.credit_grade||'C',job:CP.job||'학생',isMe:true},
@@ -3039,7 +3094,7 @@ function renderEconRankTab(el){
   </div>`;
 }
 
-/* ── 세금 유틸 ── */
+/* -- 세금 유틸 -- */
 function toggleTaxRule(id){
   const rule=taxRules.find(r=>r.id===id);
   if(!rule)return;
@@ -3123,19 +3178,25 @@ async function fetchRealStocks(){
 function initStocks(){
   stockData=[...DSTOCKS];
   initTaxScheduler();
-  // Supabase stocks 테이블 로드 (있으면 우선)
-  if(SB&&CP?.class_id&&CP?.id!=='demo'&&!CP?._isGuest){
-    SB.from('stocks').select('ticker,name,price,change_pct,updated_at').order('ticker')
-      .then(({data})=>{
-        if(data&&data.length){
-          stockData=data.map(s=>({tk:s.ticker,nm:s.name,pr:parseFloat(s.price)||0,ch:parseFloat(s.change_pct)||0,currency:isNaN(s.ticker)?'USD':'KRW'}));
-          stockIsReal=false; // DB 데이터이므로 'real' 표시는 안 함
-          if(document.getElementById('pg-econ')?.classList.contains('on'))renderStocks();
-        }
-      }).catch(()=>{});
+  // stocks 테이블에서 최신 가격 먼저 로드
+  if(SB&&CP?.id!=='demo'&&!CP?._isGuest){
+    SB.from('stocks').select('ticker,name,price,change_pct').then(({data})=>{
+      if(data&&data.length){
+        stockData=data.map(s=>({tk:s.ticker,nm:s.name,pr:parseFloat(s.price)||1000,ch:parseFloat(s.change_pct)||0}));
+        if(document.getElementById('pg-econ')?.classList.contains('on'))renderStocks();
+      }
+    }).catch(()=>{});
   }
   fetchRealStocks().then(ok=>{
-    if(ok)toast('실시간 주가 로드 완료 📈','s');
+    if(ok){
+      toast('실시간 주가 로드 완료 📈','s');
+      // stocks 테이블에 최신 가격 저장
+      if(SB&&CP?.id!=='demo'&&!CP?._isGuest){
+        stockData.forEach(async s=>{
+          try{await SB.from('stocks').update({price:s.pr,change_pct:s.ch,updated_at:new Date().toISOString()}).eq('ticker',s.tk);}catch(_){}
+        });
+      }
+    }
     if(document.getElementById('pg-econ')?.classList.contains('on'))renderStocks();
   });
   // 자동 갱신 5분
@@ -3168,7 +3229,7 @@ async function renderTx(){
     let _txRes={data:null};try{_txRes=await SB.from('transactions').select('*').or(`from_id.eq.${CU.id},to_id.eq.${CU.id}`).order('created_at',{ascending:false}).limit(30);}catch(_){}
     const{data}=_txRes;
     if(data&&data.length){
-      const typeIcon={reward:'✅',purchase:'🛒',transfer:'💸',loan:'🏦',tax:'📋',stock:'📈'};
+      const typeIcon={reward:'✅',purchase:'🛒',transfer:'💸',loan:'🏦',tax:'📋',stock:'📈',save:'🏦',stock_buy:'📈',stock_sell:'📉'};
       wrap.innerHTML=`<table><thead><tr><th>종류</th><th>내용</th><th>금액</th><th>날짜</th></tr></thead><tbody>
         ${data.map(t=>{
           const isIn=t.to_id===CU.id&&t.from_id!==CU.id;
@@ -3199,7 +3260,7 @@ function stTotal(){
   if(costEl)costEl.textContent=(prCC*q).toLocaleString()+' CC';
 }
 async function doStock(type){
-  const q=parseInt(document.getElementById('st-qty').value)||1;if(!curStock)return;
+  const q=parseInt(document.getElementById('stock-qty')?.value)||1;if(!curStock)return;
   // 파산 제한: 매수만 차단 (매도는 허용 — 자산 처분해서 빚 갚기)
   if(type==='buy'&&checkBankruptBlock('주식 매수'))return;
   const prCC=curStock._prCC||Math.round((curStock.pr||0)/100);
@@ -3222,11 +3283,11 @@ async function doStock(type){
   }
   syncBal();closeMod('md-stock');
   if(SB&&CU&&CP?.class_id&&CP?.id!=='demo'){
-    await SB.from('profiles').update({balance:CP.balance,inventory:CP.inventory}).eq('id',CU.id).then(()=>{}).catch(()=>{});
-    SB.from('transactions').insert({from_id:CU.id,to_id:CU.id,amount:type==='buy'?-total:total,type:'stock',description:`${curStock.nm} ${q}주 ${type==='buy'?'매수':'매도'}`,class_id:CP.class_id}).then(()=>{}).catch(()=>{});
+    await sbSave(SB.from('profiles').update({balance:CP.balance,inventory:CP.inventory}).eq('id',CU.id),'잔액/인벤 저장');
+    sbSave(SB.from('transactions').insert({from_id:CU.id,to_id:CU.id,amount:type==='buy'?-total:total,type:type==='buy'?'stock_buy':'stock_sell',description:`${curStock.nm} ${q}주 ${type==='buy'?'매수':'매도'}`,class_id:CP.class_id}),'기록 저장');
     const holding=CP.inventory.find(i=>i.id==='stk_'+curStock.tk);
     const newQty=holding?holding.qty:0;
-    SB.from('stock_holdings').upsert({user_id:CU.id,ticker:curStock.tk,quantity:newQty,avg_price:prCC},{onConflict:'user_id,ticker'}).then(()=>{}).catch(()=>{});
+    sbSave(SB.from('stock_holdings').upsert({user_id:CU.id,ticker:curStock.tk,quantity:newQty,avg_price:prCC},{onConflict:'user_id,ticker'}),'주식 보유 저장');
   }
 }
 async function doTransfer(){
@@ -3241,13 +3302,13 @@ async function doTransfer(){
   if(SB&&CU&&CP?.class_id&&CP?.id!=='demo'&&!CP?._isGuest){
     // 수신자 찾기
     const recip=DSTU.find(s=>s.nm===to);
-    await SB.from('profiles').update({balance:CP.balance}).eq('id',CU.id).then(()=>{}).catch(()=>{});
+    await sbSave(SB.from('profiles').update({balance:CP.balance}).eq('id',CU.id),'잔액 저장');
     if(recip?.id){
       let _pr={data:null};try{_pr=await SB.from('profiles').select('balance').eq('id',recip.id).single();}catch(_){}
       const{data}=_pr;
-      if(data) SB.from('profiles').update({balance:(data.balance||0)+amt}).eq('id',recip.id).then(()=>{}).catch(()=>{});
+      if(data) sbSave(SB.from('profiles').update({balance:(data.balance||0)+amt}).eq('id',recip.id),'송금 수신 저장');
     }
-    SB.from('transactions').insert({from_id:CU.id,to_id:recip?.id||null,amount:amt,type:'transfer',description:`${to}에게 송금`,class_id:CP.class_id}).then(()=>{}).catch(()=>{});
+    sbSave(SB.from('transactions').insert({from_id:CU.id,to_id:recip?.id||null,amount:amt,type:'transfer',description:`${to}에게 송금`,class_id:CP.class_id}),'기록 저장');
   }
 }
 async function doLoan(){
@@ -3261,9 +3322,9 @@ async function doLoan(){
   toast(`${amt.toLocaleString()} CC 대출 완료 (이자 ${interest}%)`,'s');
   closeMod('md-loan');
   if(SB&&CU&&CP?.class_id&&CP?.id!=='demo'&&!CP?._isGuest){
-    await SB.from('profiles').update({balance:CP.balance}).eq('id',CU.id).then(()=>{}).catch(()=>{});
-    SB.from('loans').insert({borrower_id:CU.id,class_id:CP.class_id,amount:amt,interest}).then(()=>{}).catch(()=>{});
-    SB.from('transactions').insert({from_id:CU.id,to_id:CU.id,amount:amt,type:'loan',description:`대출 (이자 ${interest}%)`,class_id:CP.class_id}).then(()=>{}).catch(()=>{});
+    await sbSave(SB.from('profiles').update({balance:CP.balance}).eq('id',CU.id),'잔액 저장');
+    sbSave(SB.from('loans').insert({borrower_id:CU.id,class_id:CP.class_id,amount:amt,interest}),'대출 저장');
+    SB.from('transactions').insert({from_id:CU.id,to_id:CU.id,amount:amt,type:'loan',description:`대출 (이자 ${interest}%)`,class_id:CP.class_id}).then(()=>{},()=>{});
   }
 }
 async function doSave(){
@@ -3276,14 +3337,14 @@ async function doSave(){
   toast(`${amt.toLocaleString()} CC 저금 완료! 5% 이자`,'s');
   closeMod('md-save');
   if(SB&&CU&&CP?.class_id&&CP?.id!=='demo'&&!CP?._isGuest){
-    await SB.from('profiles').update({balance:CP.balance}).eq('id',CU.id).then(()=>{}).catch(()=>{});
-    SB.from('transactions').insert({from_id:CU.id,to_id:CU.id,amount:-amt,type:'transfer',description:`저금 (이자 5%)`,class_id:CP.class_id}).then(()=>{}).catch(()=>{});
+    await sbSave(SB.from('profiles').update({balance:CP.balance}).eq('id',CU.id),'잔액 저장');
+    SB.from('transactions').insert({from_id:CU.id,to_id:CU.id,amount:-amt,type:'save',description:`저금 (이자 5%)`,class_id:CP.class_id}).then(()=>{},()=>{});
   }
 }
 
-/* ═══════════════════════════════════════════
+/* ===========================================
    SHOP (tabbed: items / my items / avatar / my avatar / market)
-═══════════════════════════════════════════ */
+=========================================== */
 const DSHOP=[
   {id:1,nm:'자유 좌석권',desc:'하루 동안 원하는 자리',cat:'권리',pr:150,st:-1},
   {id:2,nm:'핸드폰 1시간',desc:'수업 중 1시간 사용 허가',cat:'권리',pr:300,st:5},
@@ -3335,7 +3396,7 @@ async function loadMarketListings(){
       .eq('status','active')
       .order('created_at',{ascending:false});
     marketListings=(data||[]).map(m=>({
-      id:m.id,seller:m.seller_name||'판매자',
+      id:m.id,seller:m.seller_name||'판매자',sellerId:m.seller_id||null,
       nm:m.item_name||'아이템',pr:m.price||0,
       itemId:m.item_id,ico:m.item_icon||'🏷️',
       ts:new Date(m.created_at).toLocaleString('ko-KR',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})
@@ -3650,12 +3711,12 @@ function applyJob(id){
   // 학생 역할이면 pendingJob에 저장, 선생님은 바로 적용
   if(CP.role==='student'){
     CP.pendingJob=j.nm; CP.pendingJobId=id;
-    if(SB&&CU) SB.from('profiles').update({pending_job:j.nm}).eq('id',CU.id).then(()=>{}).catch(()=>{});
+    if(SB&&CU) sbSave(SB.from('profiles').update({pending_job:j.nm}).eq('id',CU.id),'직업 신청 저장');
     loadJobs();
     toast(j.nm+' 신청 완료! 선생님 승인 대기 중 ⏳','s');
   } else {
     CP.job=j.nm; CP.job_salary=j.sal||0;
-    if(SB&&CU) SB.from('profiles').update({job:j.nm,job_salary:j.sal||0}).eq('id',CU.id).then(()=>{}).catch(()=>{});
+    if(SB&&CU) sbSave(SB.from('profiles').update({job:j.nm,job_salary:j.sal||0}).eq('id',CU.id),'직업 저장');
     loadJobs();
     toast(j.nm+' 직업 적용됨 ✅','s');
   }
@@ -3670,7 +3731,7 @@ async function approveJobApp(stuId){
   s.job=jobNm; s.job_salary=j?.sal||0; delete s.pendingJob;
   toast(`✅ ${s.nm}의 직업 "${jobNm}" 승인됨`,'s');
   if(SB&&s.id&&!s.id.startsWith('s')){
-    await SB.from('profiles').update({job:jobNm,job_salary:j?.sal||0,pending_job:null}).eq('id',stuId).then(()=>{}).catch(()=>{});
+    await sbSave(SB.from('profiles').update({job:jobNm,job_salary:j?.sal||0,pending_job:null}).eq('id',stuId),'직업 승인 저장');
   }
   admTab('jobs',null);
 }
@@ -3682,14 +3743,14 @@ async function rejectJobApp(stuId){
   delete s.pendingJob;
   toast(`❌ ${s.nm}의 "${jobNm}" 신청 거절됨`,'i');
   if(SB&&s.id&&!s.id.startsWith('s')){
-    await SB.from('profiles').update({pending_job:null}).eq('id',stuId).then(()=>{}).catch(()=>{});
+    await sbSave(SB.from('profiles').update({pending_job:null}).eq('id',stuId),'직업 거부 저장');
   }
   admTab('jobs',null);
 }
 
-/* ═══════════════════════════════════════════
+/* ===========================================
    CREDIT
-═══════════════════════════════════════════ */
+=========================================== */
 function loadCredit(){
   const g=CP.credit_grade||'C';
   const INFO={S:{nm:'최우수',c:'var(--amber)'},A:{nm:'우수',c:'var(--green)'},B:{nm:'양호',c:'var(--blue)'},C:{nm:'보통',c:'var(--purple)'},D:{nm:'주의',c:'var(--red)'}};
@@ -3698,9 +3759,9 @@ function loadCredit(){
   document.getElementById('grade-bens').innerHTML=[{g:'S',b:'대출 10,000 CC / 이자 2% / 상점 10% 할인',c:'var(--amber)'},{g:'A',b:'대출 7,000 CC / 이자 3% / 상점 5% 할인',c:'var(--green)'},{g:'B',b:'대출 5,000 CC / 이자 5%',c:'var(--blue)'},{g:'C',b:'대출 3,000 CC / 이자 8%',c:'var(--purple)'},{g:'D',b:'대출 1,000 CC / 이자 15%',c:'var(--red)'}].map(b=>`<div class="g-ben ${b.g===g?'cur':''}"><div class="gbl" style="color:${b.c}">${b.g}</div><div><div style="font-size:12.5px;font-weight:700;margin-bottom:1px">${b.g===g?'✓ 현재 등급':b.g+' 등급'}</div><div style="font-size:12px;color:var(--text3)">${b.b}</div></div></div>`).join('');
 }
 
-/* ═══════════════════════════════════════════
+/* ===========================================
    ADMIN
-═══════════════════════════════════════════ */
+=========================================== */
 let DSTU=[]; // DB에서 로드됨
 let _dstuLoaded=false;
 async function loadDSTU(force){
@@ -3728,7 +3789,7 @@ async function loadDSTU(force){
   if(!data)return;
   DSTU.length=0;
   data.filter(s=>s.role==='student').forEach(s=>{
-    DSTU.push({id:s.id,nm:s.name||'',bal:s.balance||0,gr:s.credit_grade||'B',job:s.job||'학생',sus:s.is_suspended||false,inventory:Array.isArray(s.inventory)?s.inventory:[]});
+    DSTU.push({id:s.id,nm:s.name||'',bal:s.balance||0,gr:s.credit_grade||'B',job:s.job||'학생',sus:s.is_suspended||false});
   });
   _dstuLoaded=true;
 }
@@ -3875,10 +3936,7 @@ async function admTab(tab,btn){
           </div>`}).join('')}
         </div>`;break;}
     case'credit':el.innerHTML=`<div class="tw"><div class="tw-hdr"><div class="tw-title">신용 등급 관리</div></div><table><thead><tr><th>학생</th><th>등급</th><th>점수</th><th>수정</th></tr></thead><tbody>${DSTU.map(s=>`<tr><td>${s.nm}</td><td><span class="chip ${s.gr==='S'?'chip-a':s.gr==='A'?'chip-g':s.gr==='B'?'chip-b':s.gr==='C'?'chip-p':'chip-r'}">${s.gr}</span></td><td>${{S:900,A:800,B:700,C:600,D:500}[s.gr]}</td><td><button class="btn btn-g btn-xs" onclick="editGrade('${s.id}','${s.nm}','${s.gr}')">수정</button></td></tr>`).join('')}</tbody></table></div>`;break;
-    case'time':{
-      const _tr=window._savedTimeRestrict||{};
-      const _cm=window._savedClassMsg||{};
-      el.innerHTML=`<div class="g2"><div class="card"><div class="card-t"><svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5.5" stroke="#1d4ed8" stroke-width="1.3"/><path d="M6.5 3.5v3.5l2 1.5" stroke="#1d4ed8" stroke-width="1.3" stroke-linecap="round"/></svg>이용 시간 설정</div><div style="display:flex;flex-direction:column;gap:10px"><div class="fg"><label class="fl">시작</label><input class="fi" type="time" id="ts" value="${_tr.start||'09:00'}"></div><div class="fg"><label class="fl">종료</label><input class="fi" type="time" id="te" value="${_tr.end||'17:00'}"></div><label style="display:flex;align-items:center;gap:7px;font-size:13px;cursor:pointer"><input type="checkbox" id="ta" style="accent-color:var(--blue)"${_tr.active?' checked':''}>시간 제한 활성화</label><button class="btn btn-p btn-sm" onclick="saveTime()">저장</button></div></div><div class="card"><div class="card-t"><svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M6.5 1.5C4 1.5 2 3.2 2 5.5c0 1.2.55 2.3 1.4 3V11L6.5 9.5c2.5 0 4.5-1.8 4.5-4S9 1.5 6.5 1.5z" stroke="#1d4ed8" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>수업 메시지</div><div style="display:flex;flex-direction:column;gap:10px"><div class="fg"><label class="fl">메시지</label><input class="fi" id="cmsg" value="${escHtml(_cm.text||'수업이 시작됩니다. 자리에 앉아주세요!')}"></div><div class="fg"><label class="fl">표시 시간</label><input class="fi" type="time" id="ctime" value="${_cm.time||'09:00'}"></div><div style="display:flex;gap:6px"><button class="btn btn-p btn-sm" onclick="saveMsg()">저장</button><button class="btn btn-g btn-sm" onclick="showBanner(document.getElementById('cmsg').value)">지금 표시</button></div></div></div></div>`;break;}
+    case'time':el.innerHTML=`<div class="g2"><div class="card"><div class="card-t"><svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5.5" stroke="#1d4ed8" stroke-width="1.3"/><path d="M6.5 3.5v3.5l2 1.5" stroke="#1d4ed8" stroke-width="1.3" stroke-linecap="round"/></svg>이용 시간 설정</div><div style="display:flex;flex-direction:column;gap:10px"><div class="fg"><label class="fl">시작</label><input class="fi" type="time" id="ts" value="09:00"></div><div class="fg"><label class="fl">종료</label><input class="fi" type="time" id="te" value="17:00"></div><label style="display:flex;align-items:center;gap:7px;font-size:13px;cursor:pointer"><input type="checkbox" id="ta" style="accent-color:var(--blue)">시간 제한 활성화</label><button class="btn btn-p btn-sm" onclick="saveTime()">저장</button></div></div><div class="card"><div class="card-t"><svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M6.5 1.5C4 1.5 2 3.2 2 5.5c0 1.2.55 2.3 1.4 3V11L6.5 9.5c2.5 0 4.5-1.8 4.5-4S9 1.5 6.5 1.5z" stroke="#1d4ed8" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>수업 메시지</div><div style="display:flex;flex-direction:column;gap:10px"><div class="fg"><label class="fl">메시지</label><input class="fi" id="cmsg" value="수업이 시작됩니다. 자리에 앉아주세요!"></div><div class="fg"><label class="fl">표시 시간</label><input class="fi" type="time" id="ctime" value="09:00"></div><div style="display:flex;gap:6px"><button class="btn btn-p btn-sm" onclick="saveMsg()">저장</button><button class="btn btn-g btn-sm" onclick="showBanner(document.getElementById('cmsg').value)">지금 표시</button></div></div></div></div>`;break;
     case'notice':{ 
       // Supabase에서 공지 로드
       if(SB&&CP?.class_id&&(!window._notices||window._notices._loaded!==CP.class_id)){
@@ -3889,7 +3947,7 @@ async function admTab(tab,btn){
               window._notices._loaded=CP.class_id;
               admTab('notice',document.querySelector('#adm-tabs .admtab.on'));
             }
-          }).catch(()=>{});
+          }).then(()=>{},()=>{});
       }
       const noticeList=window._notices||[];
       el.innerHTML=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;max-width:900px">
@@ -4226,8 +4284,8 @@ function admGiveCC(idx){
   s.bal=Math.max(0,s.bal+amt);
   toast(`${s.nm}에게 ${amt>0?'+':''}${amt} CC 지급!`,'s');
   if(SB&&s.id&&!s.id.startsWith('s')&&CP?.id!=='demo'){
-    SB.from('profiles').update({balance:s.bal}).eq('id',s.id).then(()=>{}).catch(()=>{});
-    SB.from('transactions').insert({from_id:CU?.id,to_id:s.id,amount:amt,type:'reward',description:`관리자 지급 (${CP?.name||'선생님'})`,class_id:CP?.class_id}).then(()=>{}).catch(()=>{});
+    sbSave(SB.from('profiles').update({balance:s.bal}).eq('id',s.id),'지급 저장');
+    SB.from('transactions').insert({from_id:CU?.id,to_id:s.id,amount:amt,type:'reward',description:`관리자 지급 (${CP?.name||'선생님'})`,class_id:CP?.class_id}).then(()=>{},()=>{});
   }
   admTab('students',null);
 }
@@ -4238,7 +4296,7 @@ function admEditStu(idx){
   const bal=parseInt(prompt('잔액:',s.bal)||s.bal);if(!isNaN(bal))s.bal=Math.max(0,bal);
   toast('학생 정보 수정됨','s');
   if(SB&&s.id&&!s.id.startsWith('s')&&CP?.id!=='demo'){
-    SB.from('profiles').update({name:s.nm,job:s.job,balance:s.bal}).eq('id',s.id).then(()=>{}).catch(()=>{});
+    sbSave(SB.from('profiles').update({name:s.nm,job:s.job,balance:s.bal}).eq('id',s.id),'학생 정보 저장');
   }
   admTab('students',null);
 }
@@ -4247,7 +4305,7 @@ function admSuspend(idx){
   s.sus=!s.sus;
   toast(`${s.nm} ${s.sus?'정지됨':'정지 해제됨'}`,'i');
   if(SB&&s.id&&!s.id.startsWith('s')&&CP?.id!=='demo'){
-    SB.from('profiles').update({is_suspended:s.sus}).eq('id',s.id).then(()=>{}).catch(()=>{});
+    sbSave(SB.from('profiles').update({is_suspended:s.sus}).eq('id',s.id),'정지 상태 저장');
   }
   admTab('students',null);
 }
@@ -4292,7 +4350,7 @@ function admDelItem(stuIdx, itemIdx){
   toast(`${itName} 삭제됨`,'i');
   // Supabase 업데이트
   if(SB&&s.id&&s.id!==('s'+(stuIdx+1))){
-    SB.from('profiles').update({inventory:s.inventory}).eq('id',s.id).then(()=>{}).catch(()=>{});
+    sbSave(SB.from('profiles').update({inventory:s.inventory}).eq('id',s.id),'인벤토리 저장');
   }
   admManageItems(stuIdx);
 }
@@ -4302,7 +4360,7 @@ function admClearAllItems(stuIdx){
   s.inventory=[];
   toast(`${s.nm} 아이템 전체 삭제`,'i');
   if(SB&&s.id&&s.id!==('s'+(stuIdx+1))){
-    SB.from('profiles').update({inventory:[]}).eq('id',s.id).then(()=>{}).catch(()=>{});
+    sbSave(SB.from('profiles').update({inventory:[]}).eq('id',s.id),'인벤토리 초기화');
   }
   document.getElementById('md-stu-items')?.remove();
 }
@@ -4321,8 +4379,8 @@ function bulkRewardDSTU(){
   if(SB&&CU&&CP?.id!=='demo'){
     DSTU.forEach(s=>{
       if(s.id&&!s.id.startsWith('s')){
-        SB.from('profiles').update({balance:s.bal}).eq('id',s.id).then(()=>{}).catch(()=>{});
-        SB.from('transactions').insert({from_id:CU.id,to_id:s.id,amount:amt,type:'reward',description:`전체 지급 (${CP?.name||'선생님'})`,class_id:CP?.class_id}).then(()=>{}).catch(()=>{});
+        sbSave(SB.from('profiles').update({balance:s.bal}).eq('id',s.id),'지급 저장');
+        SB.from('transactions').insert({from_id:CU.id,to_id:s.id,amount:amt,type:'reward',description:`전체 지급 (${CP?.name||'선생님'})`,class_id:CP?.class_id}).then(()=>{},()=>{});
       }
     });
   }
@@ -4350,10 +4408,11 @@ async function doReward(){
   toast(`${nm}에게 ${amt>=0?'+':''}${amt.toLocaleString()} CC 지급`,'s');
   closeMod('md-reward');
   if(SB&&CU&&id&&!id.startsWith('s')&&CP?.id!=='demo'){
-    const{data}=await SB.from('profiles').select('balance').eq('id',id).single().catch(()=>({data:null}));
+    let _balRes={data:null};try{_balRes=await SB.from('profiles').select('balance').eq('id',id).single();}catch(_){}
+    const{data}=_balRes;
     if(data!==null){
-      await SB.from('profiles').update({balance:Math.max(0,(data.balance||0)+amt)}).eq('id',id).then(()=>{}).catch(()=>{});
-      SB.from('transactions').insert({from_id:CU.id,to_id:id,amount:amt,type:'reward',description:reason,class_id:CP?.class_id}).then(()=>{}).catch(()=>{});
+      await sbSave(SB.from('profiles').update({balance:Math.max(0,(data.balance||0)+amt)}).eq('id',id),'특별 보상 저장');
+      sbSave(SB.from('transactions').insert({from_id:CU.id,to_id:id,amount:amt,type:'reward',description:reason,class_id:CP?.class_id}),'기록 저장');
     }
   }
   admTab('students',null);
@@ -4369,7 +4428,7 @@ async function doGrade(){
   closeMod('md-grade');
   toast(`${nm} 신용 등급 → ${g}등급`,'s');
   if(SB&&id&&!id.startsWith('s')&&CP?.id!=='demo'){
-    SB.from('profiles').update({credit_grade:g}).eq('id',id).then(()=>{}).catch(()=>{});
+    sbSave(SB.from('profiles').update({credit_grade:g}).eq('id',id),'신용등급 저장');
   }
   admTab('students',null);
 }
@@ -4381,7 +4440,7 @@ async function doSus(){
   closeMod('md-confirm-sus');
   toast('계정 상태 변경','i');
   if(SB&&id&&!id.startsWith('s')&&CP?.id!=='demo'){
-    SB.from('profiles').update({is_suspended:s?.sus||false}).eq('id',id).then(()=>{}).catch(()=>{});
+    sbSave(SB.from('profiles').update({is_suspended:s?.sus||false}).eq('id',id),'정지 저장');
   }
   admTab('students',null);
 }
@@ -4409,7 +4468,7 @@ function delQ(id){confirmDel('이 퀘스트를 삭제할까요?',()=>{
   questData=questData.filter(q=>q.id!==id);
   admTab('quests',null);
   toast('삭제','i');
-  if(SB&&CU) SB.from('quests').update({is_active:false}).eq('id',String(id)).then(()=>{}).catch(()=>{});
+  if(SB&&CU) sbSave(SB.from('quests').update({is_active:false}).eq('id',String(id)),'퀘스트 저장');
 });}
 async function addItem(){
   const nm=document.getElementById('ai-nm').value.trim();
@@ -4423,35 +4482,35 @@ async function addItem(){
   closeMod('md-additem');
   toast('상품 추가','s');
   if(SB&&CU&&CP?.class_id&&CP?.id!=='demo'){
-    SB.from('shop_items').insert({
+    sbSave(SB.from('shop_items').insert({
       class_id:CP.class_id,name:nm,description:d,
       price:p,stock:s,category:cat,emoji:'📦',
       is_active:true,created_by:CU.id
-    }).catch(()=>{});
+    }),'상점 저장');
   }
   admTab('shop',null);
 }
 function delItem(id){confirmDel('이 상품을 삭제할까요?',()=>{
   shopItems=shopItems.filter(i=>String(i.id)!==String(id));
   admTab('shop',null);toast('삭제','i');
-  if(SB) SB.from('shop_items').update({is_active:false}).eq('id',String(id)).then(()=>{}).catch(()=>{});
+  if(SB) sbSave(SB.from('shop_items').update({is_active:false}).eq('id',String(id)),'상점 저장');
 });}
 function saveTime(){
-  const ts=document.getElementById('ts')?.value;
-  const te=document.getElementById('te')?.value;
-  const ta=document.getElementById('ta')?.checked;
-  toast(`시간 제한 저장됨`,'s');
-  if(SB&&CP?.class_id&&CP?.id!=='demo'){
-    mergeClassSettings({timeRestrict:{start:ts,end:te,active:ta}});
+  const start=document.getElementById('ts')?.value||'09:00';
+  const end=document.getElementById('te')?.value||'17:00';
+  const active=document.getElementById('ta')?.checked||false;
+  if(SB&&CP?.class_id&&CP?.id!=='demo'&&!CP?._isGuest){
+    mergeClassSettings({timeRestrict:{start,end,active}});
   }
+  toast('시간 제한 저장됨 ('+start+' ~ '+end+')','s');
 }
 function saveMsg(){
   const msg=document.getElementById('cmsg')?.value?.trim();
-  const ctime=document.getElementById('ctime')?.value;
-  toast('메시지 저장됨','s');
-  if(SB&&CP?.class_id&&CP?.id!=='demo'){
-    mergeClassSettings({classMsg:{text:msg,time:ctime}});
+  const time=document.getElementById('ctime')?.value||'09:00';
+  if(msg&&SB&&CP?.class_id&&CP?.id!=='demo'&&!CP?._isGuest){
+    mergeClassSettings({classMsg:{msg,time}});
   }
+  toast('메시지 저장됨','s');
 }
 async function addNotice(){
   const t=document.getElementById('nc-t')?.value?.trim();
@@ -4479,10 +4538,7 @@ function saveClassSettings2(){
   if(nm)CP.class_name=nm;
   if(sc){CP.school=sc;const snEl=document.getElementById('meal-school-name');if(snEl)snEl.textContent=sc+' 급식 정보';}
   buildSidebar();buildNav();
-  if(SB&&CU){
-    SB.from('profiles').update({class_name:nm,school:sc}).eq('id',CU.id).then(()=>{}).catch(()=>{});
-    if(CP?.class_id){SB.from('classes').update({name:nm,school:sc}).eq('id',CP.class_id).then(()=>{}).catch(()=>{});}
-  }
+  if(SB&&CU){ sbSave(SB.from('profiles').update({class_name:nm,school:sc}).eq('id',CU.id),'학급 정보 저장'); }
   toast('학급 설정 저장됨! ✅','s');
   devTab('classmanage',null);
 }
@@ -4493,20 +4549,25 @@ function saveClassSettings(){
   if(sc){CP.school=sc;const snEl=document.getElementById('meal-school-name');if(snEl)snEl.textContent=sc+' 급식 정보';}
   buildSidebar();buildNav();
   if(SB&&CU){
-    SB.from('profiles').update({class_name:nm,school:sc}).eq('id',CU.id).then(()=>{}).catch(()=>{});
-    if(CP?.class_id){SB.from('classes').update({name:nm,school:sc}).eq('id',CP.class_id).then(()=>{}).catch(()=>{});}
+    // profiles 업데이트
+    sbSave(SB.from('profiles').update({class_name:nm,school:sc}).eq('id',CU.id),'학급 정보 저장');
+    // classes 테이블도 업데이트
+    if(CP?.class_id&&CP?.id!=='demo'&&!CP?._isGuest){
+      sbSave(SB.from('classes').update({name:nm,school:sc}).eq('id',CP.class_id),'학급 테이블 저장');
+    }
   }
   toast('학급 설정 저장됨! ✅','s');
   admTab('classmanage',null);
 }
 function deleteNotice(id){
   if(!window._notices)return;
+  const notice=window._notices.find(n=>n.id===id);
   window._notices=window._notices.filter(n=>n.id!==id);
+  if(SB&&CU&&notice&&CP?.id!=='demo'&&!CP?._isGuest){
+    sbSave(SB.from('notices').delete().eq('id',String(id)),'공지 삭제');
+  }
   admTab('notice',document.querySelector('#adm-tabs .admtab.on'));
   toast('공지 삭제','i');
-  if(SB&&CP?.id!=='demo'){
-    SB.from('notices').delete().eq('id',String(id)).then(()=>{}).catch(()=>{});
-  }
 }
 function admSelectAll(){
   document.querySelectorAll('.quest-stu-cb').forEach(cb=>cb.checked=true);
@@ -4520,7 +4581,7 @@ function admBulkReward(reward){
   document.getElementById('md-quest-manage')?.remove();
 }
 
-/* ─── 공동구매 참여 현황 ─── */
+/* --- 공동구매 참여 현황 --- */
 let groupBuyData={};
 function showGroupBuyDetail(itemId){
   const item=(shopItems.length?shopItems:DSHOP).find(i=>String(i.id)===String(itemId));
@@ -4581,17 +4642,11 @@ function joinGroupBuy(itemId,goal){
   document.getElementById('md-groupbuy')?.remove();
   showGroupBuyDetail(itemId);
   toast(`+${amt.toLocaleString()} CC 기부 완료!`,'s');
-  if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest){
-    SB.from('profiles').update({balance:CP.balance}).eq('id',CU.id).then(()=>{}).catch(()=>{});
-    SB.from('transactions').insert({from_id:CU.id,to_id:CU.id,amount:-amt,type:'purchase',description:'공동구매 기부',class_id:CP.class_id||null}).then(()=>{}).catch(()=>{});
-    // groupBuyData를 classes.settings에 저장
-    if(CP?.class_id) mergeClassSettings({groupBuyData});
-  }
 }
 
-/* ═══════════════════════════════════════════
+/* ===========================================
    RANKING (자산 순위)
-═══════════════════════════════════════════ */
+=========================================== */
 function loadRanking(){
   const isTeacher=CP.role==='teacher'||CP.role==='dev'||CP.role==='superadmin';
   // 선생님은 랭킹에 포함 안 함, 학생 본인만 포함
@@ -4638,9 +4693,9 @@ function loadRanking(){
   </div>`;
 }
 
-/* ═══════════════════════════════════════════
+/* ===========================================
    MEAL (급식 메뉴)
-═══════════════════════════════════════════ */
+=========================================== */
 const SAMPLE_MEALS={
   mon:{date:'월요일',cal:856,menu:['쌀밥','미역국','돼지불고기','깍두기','우유','오렌지']},
   tue:{date:'화요일',cal:912,menu:['잡곡밥','된장찌개','닭강정','시금치나물','배추김치','요구르트']},
@@ -4651,7 +4706,7 @@ const SAMPLE_MEALS={
 function loadMeal(force){
   // localStorage에서도 재시도
   try{
-    const sc=(()=>{try{return JSON.parse(localStorage.getItem('cw_school')||'null');}catch(_){return null;}})();
+    const sc=JSON.parse(localStorage.getItem('cw_school')||'null');
     if(sc){
       window._niceOfficeCode=window._niceOfficeCode||sc.officeCode;
       window._niceSchoolCode=window._niceSchoolCode||sc.schoolCode;
@@ -4831,11 +4886,11 @@ function selectSchool(officeCode,schoolCode,schoolName){
   // 저장 - localStorage + Supabase 동시 저장
   try{localStorage.setItem('cw_school',JSON.stringify({officeCode,schoolCode,schoolName}));}catch(_){}
   if(SB&&CU){
-    SB.from('profiles').update({
+    sbSave(SB.from('profiles').update({
       school:schoolName,
       office_code:officeCode,
       school_code:schoolCode
-    }).eq('id',CU.id).catch(()=>{});
+    }).eq('id',CU.id),'학교 정보 저장');
   }
   toast(`🏫 ${schoolName} 선택됨! 급식·일정 불러오는 중...`,'s');
   // 모달 닫기
@@ -4850,7 +4905,7 @@ function selectSchool(officeCode,schoolCode,schoolName){
 
 function openSchoolSearch(){
   // 저장된 학교 불러오기
-  try{const saved=(()=>{try{return JSON.parse(localStorage.getItem('cw_school')||'null');}catch(_){return null;}})();if(saved){window._niceOfficeCode=saved.officeCode;window._niceSchoolCode=saved.schoolCode;}}catch(_){}
+  try{const saved=JSON.parse(localStorage.getItem('cw_school')||'null');if(saved){window._niceOfficeCode=saved.officeCode;window._niceSchoolCode=saved.schoolCode;}}catch(_){}
   // 모달 없으면 생성
   if(!document.getElementById('md-school-search')){
     document.body.insertAdjacentHTML('beforeend',`
@@ -4956,9 +5011,9 @@ function renderMealSample(){
 }
 
 
-/* ═══════════════════════════════════════════
+/* ===========================================
    SCHEDULE (일정 캘린더)
-═══════════════════════════════════════════ */
+=========================================== */
 let schedEvents=[
   {id:1,title:'수학 시험',date:'2026-03-25',type:'exam',color:'#dc2626'},
   {id:2,title:'영어 퀴즈',date:'2026-03-27',type:'exam',color:'#dc2626'},
@@ -5150,9 +5205,9 @@ function confirmAddSched(){
   toast('일정 추가됨 📅','s');
 }
 
-/* ═══════════════════════════════════════════
+/* ===========================================
    JOB ABILITIES (직업별 능력)
-═══════════════════════════════════════════ */
+=========================================== */
 const JOB_ABILITIES={
   '학급 반장':{
     label:'공지 권한',
@@ -5162,6 +5217,10 @@ const JOB_ABILITIES={
       if(!msg?.trim())return;
       showBanner('📢 '+msg);
       toast('공지 등록!','s');
+      // Supabase notices 테이블에 저장
+      if(SB&&CU&&CP?.class_id&&CP?.id!=='demo'&&!CP?._isGuest){
+        sbSave(SB.from('notices').insert({class_id:CP.class_id,created_by:CU.id,title:'반장 공지',content:msg.trim(),is_global:false}),'공지 저장');
+      }
     }
   },
   '주식 브로커':{
@@ -5182,6 +5241,9 @@ const JOB_ABILITIES={
       if(bonus<=0){toast('잔액이 너무 적어요','e');return;}
       CP.balance+=bonus;syncCoin();
       toast(`이자 +${bonus} CC 지급!`,'s');
+      if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest){
+        SB.from('transactions').insert({from_id:CU.id,to_id:CU.id,amount:bonus,type:'interest',description:'은행원 이자 지급',class_id:CP.class_id||null}).then(()=>{},()=>{});
+      }
     }
   },
   '상점 직원':{
@@ -5190,6 +5252,9 @@ const JOB_ABILITIES={
     action(){
       toast('10% 할인 쿠폰 발행! 상점에서 사용 가능','s');
       CP.inventory.push({id:'coup_'+Date.now(),nm:'🏷 10% 할인권',cat:'쿠폰',qty:1});
+      if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest){
+        sbSave(SB.from('profiles').update({inventory:CP.inventory}).eq('id',CU.id),'쿠폰 인벤 저장');
+      }
     }
   },
   '기자':{
@@ -5198,8 +5263,14 @@ const JOB_ABILITIES={
     action(){
       const news=prompt('뉴스 제목:');
       if(!news?.trim())return;
-      DSC_MSGS['notice']?.push({id:Date.now(),nm:CP.name||'기자',col:'#0891b2',txt:'📰 [속보] '+news.trim(),ts:fmtTime(),type:'text'});
+      const newsTxt='📰 [속보] '+news.trim();
+      if(!DSC_MSGS['notice'])DSC_MSGS['notice']=[];
+      DSC_MSGS['notice'].push({id:Date.now(),nm:CP.name||'기자',uid:CU?.id||null,col:'#0891b2',txt:newsTxt,ts:fmtTime(),type:'text',_ts:Date.now()});
       toast('뉴스 발행!','s');
+      // Supabase에 저장
+      if(SB&&CU&&CP?.class_id&&CP?.id!=='demo'&&!CP?._isGuest){
+        sbSave(SB.from('channel_messages').insert({class_id:CP.class_id,channel_id:'notice',author_id:CU.id,author_name:CP.name||'기자',content:newsTxt}),'뉴스 저장');
+      }
     }
   },
   '보안관':{
@@ -5213,9 +5284,9 @@ const JOB_ABILITIES={
   },
 };
 
-/* ═══════════════════════════════════════════
+/* ===========================================
    QUESTS – 직업별 검수 승인
-═══════════════════════════════════════════ */
+=========================================== */
 // 퀘스트 완료 제출 → 직업 있는 학생이 승인
 let questApprovals=[];
 let AUDIT_ROLES=['학급 반장','반장']; // 감사원 역할
@@ -5229,9 +5300,9 @@ function submitQ(id){
   toast('✅ 완료 제출! 선생님 승인 대기 중…','i');
   // Supabase 저장
   if(SB&&CU){
-    SB.from('quest_completions').upsert({
+    sbSave(SB.from('quest_completions').upsert({
       quest_id:String(id), user_id:CU.id, status:'pending'
-    },{onConflict:'quest_id,user_id'}).catch(()=>{});
+    },{onConflict:'quest_id,user_id'}),'퀘스트 완료 저장');
   }
 }
 function approveQuest(qid,uid,reward){
@@ -5243,14 +5314,14 @@ function approveQuest(qid,uid,reward){
   toast(`✅ ${a?.nm||'학생'} 퀘스트 승인! +${reward.toLocaleString()} CC 지급`,'s');
   // SB: 퀘스트 완료 상태 & 보상 지급 저장
   if(SB&&CU){
-    SB.from('quest_completions').upsert({quest_id:String(qid),user_id:uid==='guest'?CU.id:uid,status:'approved',approved_by:CU.id},{onConflict:'quest_id,user_id'}).then(()=>{}).catch(()=>{});
+    sbSave(SB.from('quest_completions').upsert({quest_id:String(qid),user_id:uid==='guest'?CU.id:uid,status:'approved',approved_by:CU.id},{onConflict:'quest_id,user_id'}),'퀘스트 완료 저장');
     if(uid!==CP.id&&uid!=='guest'){
       // 해당 학생 잔액 업데이트 (선생님이 승인한 경우)
       SB.from('profiles').select('balance').eq('id',uid).single().then(({data})=>{
-        if(data)SB.from('profiles').update({balance:(data.balance||0)+reward}).eq('id',uid).then(()=>{}).catch(()=>{});
-      }).catch(()=>{});
+        if(data)sbSave(SB.from('profiles').update({balance:(data.balance||0)+reward}).eq('id',uid),'퀘스트 보상 저장');
+      }).then(()=>{},()=>{});
     }
-    SB.from('transactions').insert({from_id:CU.id,to_id:uid==='guest'?CU.id:uid,amount:reward,type:'reward',description:'퀘스트 보상: '+(q?.title||''),class_id:CP.class_id||null}).then(()=>{}).catch(()=>{});
+    SB.from('transactions').insert({from_id:CU.id,to_id:uid==='guest'?CU.id:uid,amount:reward,type:'reward',description:'퀘스트 보상: '+(q?.title||''),class_id:CP.class_id||null}).then(()=>{},()=>{});
   }
   if(document.getElementById('pg-quests')?.classList.contains('on'))renderQuests();
 }
@@ -5261,17 +5332,17 @@ function rejectQuest(qid,uid){
   questApprovals=questApprovals.filter(a=>!(a.qid===qid&&a.uid===uid));
   toast(`${a?.nm||'학생'} 퀘스트 반려됨`,'e');
   if(SB&&CU&&uid&&uid!=='guest'&&CP?.id!=='demo'){
-    SB.from('quest_completions').upsert(
+    sbSave(SB.from('quest_completions').upsert(
       {quest_id:String(qid),user_id:uid,status:'rejected',approved_by:CU.id},
       {onConflict:'quest_id,user_id'}
-    ).catch(()=>{});
+    ),'퀘스트 완료 저장');
   }
   if(document.getElementById('pg-quests')?.classList.contains('on'))renderQuests();
 }
 
-/* ═══════════════════════════════════════════
+/* ===========================================
    DEV
-═══════════════════════════════════════════ */
+=========================================== */
 const DPLUGINS=[
   {id:1,nm:'다이스 게임',by:'철수 선생님',desc:'주사위를 굴려 코인을 얻는 미니게임',stars:4.8,dl:234,ico:'<svg width="15" height="15" viewBox="0 0 15 15" fill="none"><rect x="1.5" y="1.5" width="12" height="12" rx="2" stroke="#1d4ed8" stroke-width="1.3"/><circle cx="5" cy="5" r="1" fill="#1d4ed8"/><circle cx="10" cy="10" r="1" fill="#1d4ed8"/><circle cx="5" cy="10" r="1" fill="#1d4ed8"/><circle cx="10" cy="5" r="1" fill="#1d4ed8"/><circle cx="7.5" cy="7.5" r="1" fill="#1d4ed8"/></svg>'},
   {id:2,nm:'퀴즈 위젯',by:'영희 선생님',desc:'학생들에게 퀴즈를 내고 정답자에게 코인 지급',stars:4.5,dl:189,ico:'<svg width="15" height="15" viewBox="0 0 15 15" fill="none"><circle cx="7.5" cy="7.5" r="6.5" stroke="#1d4ed8" stroke-width="1.3"/><path d="M5.5 5.5a2 2 0 113.5 1.3c-.5.5-1.5.8-1.5 2M7.5 11.5v.5" stroke="#1d4ed8" stroke-width="1.3" stroke-linecap="round"/></svg>'},
@@ -5394,7 +5465,7 @@ function devTab(tab,btn){
               <option value="quests">quests</option>
               <option value="quest_completions">quest_completions</option>
               <option value="shop_items">shop_items</option>
-              <option value="channel_messages">channel_messages</option>
+              <option value="messages">messages</option>
               <option value="market_listings">market_listings</option>
               <option value="boards">boards</option>
             </select>
@@ -5482,9 +5553,9 @@ function devTab(tab,btn){
     default:el.innerHTML='';
   }
 }
-/* ═══════════════════════════════════════════
+/* ===========================================
    SUPER ADMIN FUNCTIONS
-═══════════════════════════════════════════ */
+=========================================== */
 
 // 슈퍼 관리자 전용 대시보드 표시
 function showSuperAdmin(){
@@ -5667,13 +5738,13 @@ async function toggleMaintenance(){
     try{
       if(MAINTENANCE_MODE){
         // 점검 ON: 기존 점검 공지 삭제 후 새로 insert
-        await SB.from('notices').delete().eq('is_global',true).eq('title','ON').then(()=>{}).catch(()=>{});
-        await SB.from('notices').insert({
+        await sbSave(SB.from('notices').delete().eq('is_global',true).eq('title','ON'),'공지 저장');
+        await sbSave(SB.from('notices').insert({
           title:'ON',content:'점검 중',is_global:true,created_by:CU.id,class_id:null
-        }).catch(()=>{});
+        }),'공지 저장');
       } else {
         // 점검 OFF: 점검 공지 삭제
-        await SB.from('notices').delete().eq('is_global',true).eq('title','ON').then(()=>{}).catch(()=>{});
+        await sbSave(SB.from('notices').delete().eq('is_global',true).eq('title','ON'),'공지 저장');
       }
     }catch(_){}
   }
@@ -5790,7 +5861,7 @@ function sendGlobalAnnounce(){
   showBanner('📢 [전체] '+title);
   toast('전체 공지 발송!','s');
   if(SB&&CU){
-    SB.from('notices').insert({title:'[전체공지] '+title,content:body||'',is_global:true,created_by:CU.id,class_id:null}).then(()=>{}).catch(()=>{});
+    sbSave(SB.from('notices').insert({title:'[전체공지] '+title,content:body||'',is_global:true,created_by:CU.id,class_id:null}),'공지 저장');
   }
 }
 
@@ -5800,14 +5871,14 @@ function confirmDel(msg,cb){document.getElementById('del-msg').textContent=msg;_
 function doDel(){closeMod('md-confirm-del');_delCb?.();_delCb=null;}
 function rmPlugin(id){confirmDel('이 플러그인을 삭제할까요? 되돌릴 수 없어요.',()=>{pluginData=pluginData.filter(p=>p.id!==id);renderDevPlugins();toast('삭제','i');});}
 
-/* ═══════════════════════════════════════════
+/* ===========================================
    COMMUNITY
-═══════════════════════════════════════════ */
+=========================================== */
 /* loadComm, filterPlugins, installPlugin, renderPlugins, runPlugin → 아래 DSC 섹션에 정의됨 */
 
-/* ═══════════════════════════════════════════
+/* ===========================================
    BOARD (Discord-style)
-═══════════════════════════════════════════ */
+=========================================== */
 const DSC_CHANNELS=[
   {id:'general', nm:'일반',     type:'text',  desc:'자유롭게 이야기해요'},
   {id:'notice',  nm:'공지',     type:'text',  desc:'선생님 공지사항'},
@@ -5838,7 +5909,7 @@ const DSC_MSGS={
 };
 curCh='general';
 
-/* ── SVG 아이콘 헬퍼 ── */
+/* -- SVG 아이콘 헬퍼 -- */
 const DSC_ICO={
   hash:`<svg width="15" height="15" viewBox="0 0 15 15" fill="none"><path d="M3 5.5h9M3 9.5h9M5.5 2.5l-1.5 10M9.5 2.5l-1.5 10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>`,
   bell:`<svg width="15" height="15" viewBox="0 0 15 15" fill="none"><path d="M7.5 2A3.5 3.5 0 004 5.5V8.5L3 10.5h9L11 8.5V5.5A3.5 3.5 0 007.5 2z" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 10.5a1.5 1.5 0 003 0" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>`,
@@ -5867,12 +5938,29 @@ function fmtTime(){
 function escHtml(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML;}
 
 function loadBoard(){
-  renderClassBoard();
+  if(SB&&CU&&CP?.class_id&&CP?.id!=='demo'&&!CP?._isGuest){
+    SB.from('board_posts').select('id,author_name,content,image_url,created_at,author_id').eq('class_id',CP.class_id).order('created_at',{ascending:true}).limit(30)
+      .then(({data})=>{
+        if(data&&data.length){
+          boardPosts=data.map(p=>({
+            id:p.id,author:p.author_name||'학생',
+            role:p.author_id===CU?.id?CP.role:'student',
+            col:'hsl('+(p.author_name||'').split('').reduce((a,c)=>a+c.charCodeAt(0),0)%360+',55%,45%)',
+            txt:p.content||'',
+            ts:new Date(p.created_at).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}),
+            img:p.image_url||null,likes:[],comments:[]
+          }));
+        }
+        renderClassBoard();
+      }).catch(()=>renderClassBoard());
+  } else {
+    renderClassBoard();
+  }
 }
 
-/* ═══════════════════════════════════════════
+/* ===========================================
    CLASS BOARD – SNS 스타일 게시판
-═══════════════════════════════════════════ */
+=========================================== */
 let boardPosts=[
   {id:1,author:'선생님',role:'teacher',col:'#1d4ed8',txt:'안녕하세요! 학급 게시판에 오신 걸 환영해요 🎉\n자유롭게 글을 올려보세요.',ts:'오전 9:00',img:null,likes:[],comments:[
     {id:1,author:'이서연',col:'#15803d',txt:'선생님 안녕하세요! 👋',ts:'오전 9:05'}
@@ -5943,7 +6031,7 @@ function setBoardMode(mode){
   renderClassBoard();
 }
 
-/* ─── SNS 게시판 렌더링 ─── */
+/* --- SNS 게시판 렌더링 --- */
 function renderBoardSNS(){
   const isTeacher=CP.role==='teacher'||CP.role==='dev'||CP.role==='superadmin';
   const av=AVATARS?.find(a=>a.id===CP.equippedAvatar);
@@ -6140,15 +6228,13 @@ async function submitBoardPost(){
   if(prev){prev.style.display='none';prev.innerHTML='';}
   renderClassBoard();
   if(SB&&CU&&CP?.class_id&&CP?.id!=='demo'&&!CP?._isGuest){
-    SB.from('board_posts').insert({
+    sbSave(SB.from('board_posts').insert({
       class_id:CP.class_id,
       author_id:CU.id,
       author_name:CP.name||'나',
       content:txt,
       image_url:imgUrl||null
-    }).then(({error})=>{
-      if(error)console.warn('게시판 저장 오류:',error.message);
-    }).catch(e=>console.warn('게시판 저장 실패:',e));
+    }),'게시판 글 저장');
   }
 }
 function deletePost(id){
@@ -6156,7 +6242,7 @@ function deletePost(id){
   boardPosts=boardPosts.filter(p=>p.id!==id);
   document.getElementById('post-'+id)?.remove();
   toast('삭제됨','i');
-  if(SB) SB.from('board_posts').delete().eq('id',String(id)).then(()=>{}).catch(()=>{});
+  if(SB) sbSave(SB.from('board_posts').delete().eq('id',String(id)),'게시판 저장');
 }
 function toggleLike(id){
   const p=boardPosts.find(p=>p.id===id);if(!p)return;
@@ -6177,9 +6263,9 @@ function toggleLike(id){
   }
   if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest&&String(id).length>10){
     if(isNowLiked){
-      SB.from('board_post_likes').upsert({post_id:String(id),user_name:nm},{onConflict:'post_id,user_name'}).then(()=>{}).catch(()=>{});
+      SB.from('board_post_likes').upsert({post_id:String(id),user_name:nm},{onConflict:'post_id,user_name'}).then(()=>{},()=>{});
     } else {
-      SB.from('board_post_likes').delete().eq('post_id',String(id)).eq('user_name',nm).then(()=>{}).catch(()=>{});
+      SB.from('board_post_likes').delete().eq('post_id',String(id)).eq('user_name',nm).then(()=>{},()=>{});
     }
   }
 }
@@ -6203,7 +6289,7 @@ function submitComment(id){
     container.innerHTML=boardPosts.slice().reverse().map(pp=>renderPost(pp)).join('');
   }
   if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest&&String(id).length>10){
-    SB.from('board_post_comments').insert({post_id:String(id),author_name:CP.name||'나',content:txt}).then(()=>{}).catch(()=>{});
+    SB.from('board_post_comments').insert({post_id:String(id),author_name:CP.name||'나',content:txt}).then(()=>{},()=>{});
   }
   toast('댓글 등록!','s');
 }
@@ -6399,14 +6485,13 @@ function sendDscMsg(chId){
   if(el){el.insertAdjacentHTML('beforeend',renderDscMsg(msg,isFirst));el.scrollTop=el.scrollHeight;}
   // Supabase 저장
   if(SB&&CU&&CP?.class_id){
-    SB.from('channel_messages').insert({
+    sbSave(SB.from('channel_messages').insert({
       class_id:CP.class_id,
       channel_id:chId,
       author_id:CU.id,
       author_name:CP.name||'학생',
-      content:txt,
-      msg_type:'text'
-    }).catch(()=>{});
+      content:txt
+    }),'채팅 저장');
   }
 }
 
@@ -6458,13 +6543,12 @@ async function handleDscFile(e,chId){
     if(el){el.insertAdjacentHTML('beforeend',renderDscMsg(msg,isFirst));el.scrollTop=el.scrollHeight;}
     // DB 저장
     if(CP?.class_id){
-      SB.from('channel_messages').insert({
+      sbSave(SB.from('channel_messages').insert({
         class_id:CP.class_id,channel_id:chId,
         author_id:CU.id,author_name:CP.name||'학생',
         content:file.name,
-        image_url:isImg?fileUrl:null,
-        msg_type:isImg?'image':'file'
-      }).catch(()=>{});
+        image_url:isImg?fileUrl:null
+      }),'파일 전송 저장');
     }
     toast(`${isImg?'📷 사진':'📎 파일'} 전송 완료`,'s');
   }catch(err){
@@ -6493,12 +6577,11 @@ function sendAnnouncement(){
   }
   toast('공지 등록 완료','s');
   if(SB&&CU&&CP?.class_id&&CP?.id!=='demo'&&!CP?._isGuest){
-    SB.from('channel_messages').insert({
+    sbSave(SB.from('channel_messages').insert({
       class_id:CP.class_id,channel_id:'notice',
       author_id:CU.id,author_name:CP.name||'선생님',
-      content:'📢 '+txt.trim(),
-      msg_type:'text'
-    }).catch(()=>{});
+      content:'📢 '+txt.trim()
+    }),'공지 채팅 저장');
   }
 }
 
@@ -6513,16 +6596,16 @@ async function addDscChannel(){
   toast(`#${nm.trim()} 채널 생성!`,'s');
   // Supabase에 채널 정보 저장
   if(SB&&CU&&CP?.class_id&&CP?.id!=='demo'&&!CP?._isGuest){
-    SB.from('channels').insert({
+    sbSave(SB.from('channels').insert({
       id,class_id:CP.class_id,name:nm.trim(),type:'text',
       created_by:CU.id,description:nm.trim()+' 채널'
-    }).catch(()=>{});
+    }),'채널 저장');
   }
 }
 
-/* ══════════════════════════════════════════
+/* ==========================================
    PLUGIN SYSTEM (실제 설치 & 실행)
-══════════════════════════════════════════ */
+========================================== */
 const INSTALLED_PLUGINS=new Set();
 const PLUGIN_DEFS=[
   {id:1,nm:'🎲 다이스 게임',by:'철수 선생님',stars:4.8,dl:234,tag:'게임',
@@ -6583,9 +6666,29 @@ toast('⏱ '+sec+'초 타이머 시작!','i');
 const iv=setInterval(()=>{r--;if(r<=0){clearInterval(iv);toast('⏱ 타이머 종료!','s');}},1000);`},
 ];
 
-// 사용자가 만든 플러그인 (로컬 저장)
-let userPlugins=JSON.parse(localStorage.getItem('cw_user_plugins')||'[]');
-let installedSet=new Set(JSON.parse(localStorage.getItem('cw_installed')||'[]'));
+// 사용자가 만든 플러그인 (로컬 저장) - try/catch: file:// Tracking Prevention 대응
+let userPlugins=[];let installedSet=new Set();
+try{userPlugins=JSON.parse(localStorage.getItem('cw_user_plugins')||'[]');}catch(_){}
+try{installedSet=new Set(JSON.parse(localStorage.getItem('cw_installed')||'[]'));}catch(_){}
+// Supabase에서 플러그인 데이터 로드 (비동기, 앱 로드 후 호출됨)
+async function loadPluginsFromSB(){
+  if(!SB||!CU||CP?.id==='demo'||CP?._isGuest)return;
+  try{
+    // user_plugins/installed_plugins 컬럼이 DB에 없을 수 있으므로 * 로 조회 후 체크
+    const{data}=await SB.from('profiles').select('user_plugins,installed_plugins').eq('id',CU.id).maybeSingle();
+    if(!data)return; // 컬럼 없거나 row 없으면 패스
+    if(data){
+      if(data.user_plugins&&Array.isArray(data.user_plugins)&&data.user_plugins.length){
+        userPlugins=data.user_plugins;
+        try{localStorage.setItem('cw_user_plugins',JSON.stringify(userPlugins));}catch(_){}
+      }
+      if(data.installed_plugins&&Array.isArray(data.installed_plugins)&&data.installed_plugins.length){
+        installedSet=new Set(data.installed_plugins);
+        try{localStorage.setItem('cw_installed',JSON.stringify([...installedSet]));}catch(_){}
+      }
+    }
+  }catch(_){}
+}
 let pedEditId=null; // 편집 중인 플러그인 id
 
 function savePluginStorage(){
@@ -6593,16 +6696,16 @@ function savePluginStorage(){
     localStorage.setItem('cw_user_plugins',JSON.stringify(userPlugins));
     localStorage.setItem('cw_installed',JSON.stringify([...installedSet]));
   }catch(_){}
-  // Supabase에도 동기화
+  // Supabase에도 저장 (실제 계정만)
   if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest){
-    SB.from('profiles').update({
+    sbSave(SB.from('profiles').update({
       user_plugins:userPlugins,
       installed_plugins:[...installedSet]
-    }).eq('id',CU.id).catch(()=>{});
+    }).eq('id',CU.id),'플러그인 저장');
   }
 }
 
-/* ── 커뮤니티 탭 ── */
+/* -- 커뮤니티 탭 -- */
 let nationalPosts=[];
 // nationalPosts: DB에서만 로드 (데모 제외)
 
@@ -6611,8 +6714,9 @@ async function loadNationalPosts(){
   if(!SB||!CU||CP?.id==='demo'||CP?._isGuest){nationalPosts=[];return;}
   try{
     const{data}=await SB.from('board_posts')
-      .select('id,author_id,author_name,content,school,created_at')
+      .select('id,author_id,author_name,content,created_at,school')
       .is('class_id',null)
+      .not('school','like','__teacher__%')
       .order('created_at',{ascending:false}).limit(50);
     if(data&&data.length){
       nationalPosts=data.map(p=>({
@@ -6662,14 +6766,14 @@ function commTab(tab,btn){
   if(tab==='national-teacher'){
     // 선생님 커뮤 DB 로드
     if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest){
-      SB.from('board_posts').select('*').is('class_id',null).order('created_at',{ascending:false}).limit(50)
+      SB.from('board_posts').select('*').is('class_id',null).like('school','__teacher__%').order('created_at',{ascending:false}).limit(50)
         .then(({data,error})=>{
           if(!error&&data&&data.length){
             teacherPosts=data.map(p=>({id:p.id,author:p.author_name||'선생님',school:p.school||'',col:'#1d4ed8',content:p.content||'',ts:new Date(p.created_at).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}),likes:[],comments:[]}));
             const body2=document.getElementById('comm-body');
             if(body2)renderNationalTeacherComm(body2);
           }
-        }).catch(()=>{});
+        }).then(()=>{},()=>{});
     } else {
       teacherPosts=[];
     }
@@ -6770,9 +6874,9 @@ function toggleNLike(id){
   if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest&&p.id){
     const isLiked=p.likes.includes(nm);
     if(isLiked){
-      SB.from('board_post_likes').upsert({post_id:String(p.id),user_name:nm},{onConflict:'post_id,user_name'}).then(()=>{}).catch(()=>{});
+      SB.from('board_post_likes').upsert({post_id:String(p.id),user_name:nm},{onConflict:'post_id,user_name'}).then(()=>{},()=>{});
     } else {
-      SB.from('board_post_likes').delete().eq('post_id',String(p.id)).eq('user_name',nm).then(()=>{}).catch(()=>{});
+      SB.from('board_post_likes').delete().eq('post_id',String(p.id)).eq('user_name',nm).then(()=>{},()=>{});
     }
   }
 }
@@ -6789,7 +6893,7 @@ function submitNComment(id){
   if(el){const newHtml=renderNationalPost(p);const tmp=document.createElement('div');tmp.innerHTML=newHtml;el.replaceWith(tmp.firstChild);}
   toast('💬 댓글 등록!','s');
   if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest&&p.id){
-    SB.from('board_post_comments').insert({post_id:String(p.id),author_name:CP.name||'익명',content:txt}).then(()=>{}).catch(()=>{});
+    SB.from('board_post_comments').insert({post_id:String(p.id),author_name:CP.name||'익명',content:txt}).then(()=>{},()=>{});
   }
 }
 function deleteNPost(id){
@@ -6797,7 +6901,7 @@ function deleteNPost(id){
   const p=nationalPosts.find(x=>String(x.id)===String(id));
   nationalPosts=nationalPosts.filter(p=>String(p.id)!==String(id));
   if(SB&&CU&&CP?.id!=='demo'&&p&&p.id){
-    SB.from('board_posts').delete().eq('id',String(p.id)).then(()=>{}).catch(()=>{});
+    sbSave(SB.from('board_posts').delete().eq('id',String(p.id)),'게시판 저장');
   }
   document.getElementById('np-'+id)?.remove();
   toast('삭제됨','i');
@@ -6805,7 +6909,7 @@ function deleteNPost(id){
 
 function getAllPlugins(){return [...PLUGIN_DEFS,...userPlugins];}
 
-/* ── 스토어 렌더링 ── */
+/* -- 스토어 렌더링 -- */
 function filterPlugins(v){
   const q=(v||'').toLowerCase();
   renderStore(getAllPlugins().filter(p=>p.nm.toLowerCase().includes(q)||p.desc.toLowerCase().includes(q)||p.tag.toLowerCase().includes(q)));
@@ -6870,7 +6974,7 @@ function renderStore(list){
   </div>`}`;
 }
 
-/* ── 내 플러그인 탭 ── */
+/* -- 내 플러그인 탭 -- */
 function renderMyPlugins(){
   const body=document.getElementById('comm-body');
   if(!userPlugins.length){
@@ -6918,7 +7022,7 @@ function renderMyPlugins(){
   </div>`;
 }
 
-/* ── 플러그인 에디터 ── */
+/* -- 플러그인 에디터 -- */
 const SNIPPETS={
   coin:`// 코인 지급 예시
 const amount = 50;
@@ -6983,34 +7087,29 @@ function deleteUserPlugin(id){
   toast('삭제됐어요','i');
 }
 
-/* ── 실행 & 설치 ── */
+/* -- 실행 & 설치 -- */
 function runPluginCode(code){
   if(!code||typeof code!=='string'){toast('플러그인 코드가 없어요','e');return;}
   try{
     const api={
       CP,DSTU,questData,
       toast,syncCoin,goPage,openMod,closeMod,showBanner,
-      reward:(amt,reason)=>{if((CP.balance||0)<amt){toast('잔액 부족','e');return false;}CP.balance-=amt;syncCoin();toast(`💸 -${amt} CC (${reason||'차감'})`,'i');if(SB&&CU&&CP?.id!=='demo'){SB.from('profiles').update({balance:CP.balance}).eq('id',CU.id).then(()=>{}).catch(()=>{});SB.from('transactions').insert({from_id:CU.id,to_id:CU.id,amount:-amt,type:'plugin',description:reason||'플러그인 차감',class_id:CP.class_id||null}).then(()=>{}).catch(()=>{});}return true;},
-      deduct:(amt,reason)=>{if((CP.balance||0)<amt){toast('잔액 부족','e');return false;}CP.balance-=amt;syncCoin();if(SB&&CU&&CP?.id!=='demo'){SB.from('profiles').update({balance:CP.balance}).eq('id',CU.id).then(()=>{}).catch(()=>{});SB.from('transactions').insert({from_id:CU.id,to_id:CU.id,amount:-amt,type:'plugin',description:reason||'플러그인 차감',class_id:CP.class_id||null}).then(()=>{}).catch(()=>{});}return true;},
-      give:(amt,reason)=>{CP.balance=(CP.balance||0)+amt;syncCoin();toast(`💰 +${amt} CC (${reason||'지급'})`,'s');if(SB&&CU&&CP?.id!=='demo'){SB.from('profiles').update({balance:CP.balance}).eq('id',CU.id).then(()=>{}).catch(()=>{});SB.from('transactions').insert({from_id:CU.id,to_id:CU.id,amount:amt,type:'plugin',description:reason||'플러그인 지급',class_id:CP.class_id||null}).then(()=>{}).catch(()=>{});}},
+      reward:(amt,reason)=>{if((CP.balance||0)<amt){toast('잔액 부족','e');return false;}CP.balance-=amt;syncCoin();toast(`💸 -${amt} CC (${reason||'차감'})`,'i');return true;},
+      deduct:(amt,reason)=>{if((CP.balance||0)<amt){toast('잔액 부족','e');return false;}CP.balance-=amt;syncCoin();return true;},
+      give:(amt,reason)=>{CP.balance=(CP.balance||0)+amt;syncCoin();toast(`💰 +${amt} CC (${reason||'지급'})`,'s');},
       getStudents:()=>DSTU,
       getStudent:(nm)=>DSTU.find(s=>s.nm===nm),
       announce:(msg)=>showBanner(msg),
       save:(key,val)=>{
         try{localStorage.setItem('plg_'+key,JSON.stringify(val));}catch(_){}
-        if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest){
-          // plugin_data JSONB 컬럼에 병합 저장
-          SB.from('profiles').select('plugin_data').eq('id',CU.id).single()
-            .then(({data})=>{
-              const merged={...(data?.plugin_data||{}),[key]:val};
-              SB.from('profiles').update({plugin_data:merged}).eq('id',CU.id).catch(()=>{});
-            }).catch(()=>{});
+        // Supabase classes.settings에도 저장
+        if(SB&&CP?.class_id&&CP?.id!=='demo'&&!CP?._isGuest){
+          mergeClassSettings({['plg_'+key]:val}).catch(()=>{});
         }
       },
       load:(key,def)=>{
-        // Supabase에서 먼저 읽기 (비동기이므로 우선 localStorage fallback)
-        try{const v=localStorage.getItem('plg_'+key);if(v!==null)return JSON.parse(v)??def;}catch(_){}
-        return def;
+        // Supabase에서 로드 시도 (비동기는 복잡하므로 localStorage 우선)
+        try{return JSON.parse(localStorage.getItem('plg_'+key))??def;}catch(_){return def;}
       },
       input:(label,def)=>prompt(label,def||''),
       confirm:(msg)=>confirm(msg),
@@ -7075,9 +7174,9 @@ function addPluginToBoard(id){
 // 구버전 installPlugin 호환
 function installPlugin(id){toggleInstall(id);}
 
-/* ═══════════════════════════════════════════
+/* ===========================================
    BOARD EDITOR
-═══════════════════════════════════════════ */
+=========================================== */
 const WDEFS={
   bank:{t:'은행',w:260,h:160},shop:{t:'상점',w:280,h:200},quests:{t:'퀘스트',w:280,h:220},
   stocks:{t:'주식',w:300,h:200},jobs:{t:'직업',w:260,h:180},credit:{t:'신용등급',w:220,h:140},
@@ -7088,7 +7187,7 @@ const WDEFS={
   schedule:{t:'학사일정',w:300,h:220},
   script:{t:'스크립트',w:300,h:200},iframe:{t:'외부사이트',w:400,h:300},text:{t:'텍스트',w:240,h:120}
 };
-/* ── 경매 시스템 ── */
+/* -- 경매 시스템 -- */
 window._auctions=[];
 function openAuction(){
   const isTeacher=CP?.role==='teacher'||CP?.role==='dev'||CP?.role==='superadmin';
@@ -7106,7 +7205,7 @@ function openAuction(){
       if(a.timeLeft<=0){
         clearInterval(iv);
         toast(`🔨 경매 종료! ${a.bidder} 낙찰 - ${a.bid.toLocaleString()} CC`,'s');
-        if(a.bidder!=='없음'){CP.balance-=a.bid;syncCoin();if(SB&&CU&&CP?.id!=='demo'){SB.from('profiles').update({balance:CP.balance}).eq('id',CU.id).then(()=>{}).catch(()=>{});SB.from('transactions').insert({from_id:CU.id,to_id:CU.id,amount:-a.bid,type:'purchase',description:'경매 낙찰: '+a.item,class_id:CP.class_id||null}).then(()=>{}).catch(()=>{});}}
+        if(a.bidder!=='없음'){CP.balance-=a.bid;syncCoin();}
         window._auctions=[];
       }
     },1000);
@@ -7145,7 +7244,7 @@ function updateEdPluginList(){
   // 드래그 이벤트 재등록
   list.querySelectorAll('.wg-row[draggable]').forEach(el=>el.ondragstart=e=>e.dataTransfer.setData('wt',el.dataset.wt));
 }
-function closeBded(){document.getElementById('bded').classList.remove('on');}
+function closeBded(){document.getElementById('bded')?.classList.remove('on');}
 function setupEdDnd(){
   const cv=document.getElementById('ed-cv');
   document.querySelectorAll('.wg-row[draggable]').forEach(el=>el.ondragstart=e=>e.dataTransfer.setData('wt',el.dataset.wt));
@@ -7288,7 +7387,7 @@ async function saveBoard(){
   });
   const data={widgets};
   if(SB&&CU&&CP?.class_id){
-    const{error}=await SB.from('boards').upsert({class_id:CP.class_id,data,updated_by:CU.id},{onConflict:'class_id'}).catch(e=>({error:e}));
+    let error=null;try{const r=await SB.from('boards').upsert({class_id:CP.class_id,data,updated_by:CU.id},{onConflict:'class_id'});error=r.error||null;}catch(e){error=e;}
     if(error){toast('저장 실패: '+error.message,'e');return;}
   }
   boardWidgets=widgets;
@@ -7323,9 +7422,9 @@ function previewBoard(){
   goPage('pg-board');
 }
 
-/* ═══════════════════════════════════════════
+/* ===========================================
    SCHOOL BOARD VIEW
-═══════════════════════════════════════════ */
+=========================================== */
 function openSbv(){
   document.getElementById('sbv').classList.add('on');
   
@@ -7398,9 +7497,9 @@ function clickSbw(type){
   if(type==='script'){toast('스크립트 위젯 - 편집기에서 설정하세요','i');return;}
 }
 
-/* ═══════════════════════════════════════════
+/* ===========================================
    PROFILE
-═══════════════════════════════════════════ */
+=========================================== */
 async function openProfileById(uid, nm){
   if(!uid||uid==='null'||uid===''){
     // uid 없으면 이름으로 DSTU에서 찾기
@@ -7520,9 +7619,9 @@ function openProfile(targetCP){
 }
 function bellClick(){document.getElementById('bell-dot').style.display='none';toast('새 알림이 없어요','i');}
 
-/* ═══════════════════════════════════════════
+/* ===========================================
    SCRIPT
-═══════════════════════════════════════════ */
+=========================================== */
 function testScript(){
   const code=document.getElementById('sc-code').value;
   const out=document.getElementById('sc-out');
@@ -7534,12 +7633,12 @@ function testScript(){
 }
 function saveScript(){if(!selW){toast('위젯 먼저 선택','e');return;}selW.script=document.getElementById('sc-code').value;closeMod('md-script');toast('저장','s');}
 
-/* ═══════════════════════════════════════════
+/* ===========================================
    HELPERS
-═══════════════════════════════════════════ */
+=========================================== */
 function syncBal(){syncCoin();}
-function openMod(id){document.getElementById(id).classList.add('on');}
-function closeMod(id){document.getElementById(id).classList.remove('on');}
+function openMod(id){const _el=document.getElementById(id);if(_el)_el.classList.add('on');}
+function closeMod(id){const _el=document.getElementById(id);if(_el)_el.classList.remove('on');}
 document.querySelectorAll('.ov').forEach(o=>o.addEventListener('click',e=>{if(e.target===o)o.classList.remove('on');}));
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){document.querySelectorAll('.ov.on').forEach(o=>o.classList.remove('on'));}});
 function showErr(el,msg){
@@ -7566,7 +7665,7 @@ function toast(msg,type='i'){
 
 
 
-/* ═══ RESTORED FUNCTIONS ═══ */
+/* === RESTORED FUNCTIONS === */
 
 function syncCoin(){
   const v=(CP.balance||0).toLocaleString();
@@ -7576,7 +7675,6 @@ function syncCoin(){
   if(SB&&CU)syncCoinDB();
 }
 
-let _syncCoinWriting=false; // DB 쓰기 중 플래그
 let _syncCoinTimer=null;    // 디바운스 타이머
 async function syncCoinDB(){
   if(CP?._isGuest||CP?.id==='demo'||!CU)return;
@@ -7610,7 +7708,7 @@ async function loadQuests(){
     // 내 완료 상태 로드
     if(CU){
       let _r4={data:[]};try{_r4=await SB.from('quest_completions').select('quest_id,status').eq('user_id',CU.id);}catch(_){}
-      const{data:comps}=_r4;
+    const{data:comps}=_r4;
       (comps||[]).forEach(c=>{
         const q=questData.find(x=>String(x.id)===String(c.quest_id));
         if(q) q.status=c.status==='approved'?'done':'pending';
@@ -7638,22 +7736,10 @@ async function loadQuests(){
 
 function qf(f,btn){
   qFilter=f;
-  selQuestId=null; // 필터 변경 시 선택 초기화 → 첫 항목 자동선택
   document.querySelectorAll('#qf-wrap .btn').forEach(b=>{
     b.className=b===btn?'btn btn-p btn-xs':'btn btn-g btn-xs';
   });
-  // 중앙/우측 패널 초기화
-  const main=document.getElementById('quests-main-area');
-  const panel=document.getElementById('quests-info-panel');
-  if(main)main.innerHTML=`<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:16px;padding:40px">
-    <div style="width:72px;height:72px;border-radius:20px;background:#eff6ff;display:flex;align-items:center;justify-content:center">
-      <svg width="36" height="36" viewBox="0 0 36 36" fill="none"><circle cx="18" cy="18" r="15" stroke="#3b82f6" stroke-width="1.8"/><path d="M12 18l4.5 4.5 7.5-9" stroke="#3b82f6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-    </div>
-    <div style="text-align:center"><div style="font-size:17px;font-weight:800;color:#1d4ed8;margin-bottom:6px">퀘스트를 선택하세요</div><div style="font-size:13px;color:#94a3b8;line-height:1.6">좌측에서 퀘스트를 클릭하면<br>상세 내용이 표시됩니다</div></div>
-  </div>`;
-  if(panel)panel.innerHTML='';
   renderQuestSidebar();
-  return false;
 }
 
 function renderQuestSidebar(){
@@ -7671,17 +7757,17 @@ function renderQuestSidebar(){
     </div>`:''}
     <div style="font-size:11px;color:#94a3b8;font-weight:700;text-transform:uppercase;letter-spacing:.8px;padding:0 4px;margin-bottom:6px">진행중 ${list.filter(q=>q.status==='active').length}개</div>
     ${list.map(q=>{
-      const sel=String(selQuestId)===String(q.id);
+      const sel=selQuestId===q.id;
       const stColor={active:'#1d4ed8',done:'#15803d',pending:'#f59e0b'}[q.status]||'#94a3b8';
       const stLabel={active:'진행중',done:'완료',pending:'대기'}[q.status]||q.status;
-      return `<div onclick="selectQuest(${q.id})" style="padding:12px;border-radius:12px;cursor:pointer;margin-bottom:4px;background:${sel?'#eff6ff':'transparent'};border:1.5px solid ${sel?'#3b82f6':'transparent'};transition:.15s" onmouseover="${sel?'':'this.style.background=\'#f8faff\''}" onmouseout="${sel?'':'this.style.background=\'transparent\''}">
+      return `<div onclick="selectQuest(${q.id})" style="padding:12px;border-radius:12px;cursor:pointer;margin-bottom:4px;background:${sel?'#eff6ff':'transparent'};border:1.5px solid ${sel?'#3b82f6':'transparent'};transition:.15s" onmouseover="if(${!sel})this.style.background='#f8faff'" onmouseout="if(${!sel})this.style.background='transparent'">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
           <span style="width:7px;height:7px;border-radius:50%;background:${stColor};flex-shrink:0"></span>
           <span style="font-size:13.5px;font-weight:700;color:#0f172a;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(q.title)}</span>
           <span style="font-size:11px;font-weight:700;color:${stColor};flex-shrink:0">${stLabel}</span>
         </div>
         <div style="display:flex;align-items:center;gap:8px">
-          <div style="flex:1;height:4px;background:#f1f5f9;border-radius:99px;overflow:hidden"><div style="height:100%;background:${stColor};width:${q.total>0?Math.round((q.prog/q.total)*100):0}%;transition:.4s"></div></div>
+          <div style="flex:1;height:4px;background:#f1f5f9;border-radius:99px;overflow:hidden"><div style="height:100%;background:${stColor};width:${Math.round((q.prog/q.total)*100)}%;transition:.4s"></div></div>
           <div class="cc-coin-ico cc-coin-ico-sm">C</div>
           <span style="font-size:12px;font-weight:700;color:#b45309">${q.reward}</span>
         </div>
@@ -7695,7 +7781,7 @@ function renderQuestSidebar(){
 function selectQuest(id){
   selQuestId=id;
   renderQuestSidebar();
-  const q=questData.find(q=>String(q.id)===String(id));
+  const q=questData.find(q=>q.id===id);
   if(!q)return;
   const main=document.getElementById('quests-main-area');
   const panel=document.getElementById('quests-info-panel');
@@ -7745,7 +7831,7 @@ function selectQuest(id){
       </div>
     </div>`;
   } else {
-    const pct=q.total>0?Math.round(q.prog/q.total*100):0;
+    const pct=Math.round(q.prog/q.total*100);
     main.innerHTML=`<div style="padding:24px">
       <div style="font-size:20px;font-weight:900;color:#0f172a;margin-bottom:8px">${escHtml(q.title)}</div>
       <div style="font-size:14px;color:#64748b;margin-bottom:20px">${escHtml(q.desc)}</div>
@@ -7793,7 +7879,7 @@ function selectQuest(id){
         <div style="font-size:11px;color:#94a3b8;margin-top:2px">미완료</div>
       </div>
     </div>
-    ${canApprove?`<button class="btn btn-r btn-sm" style="width:100%;margin-top:12px" onclick="if(confirm('퀘스트를 삭제할까요?')){questData=questData.filter(q=>String(q.id)!==String(${JSON.stringify(id)}));if(SB&&CU&&CP?.id!=='demo'){SB.from('quests').update({is_active:false}).eq('id',String(${JSON.stringify(id)})).then(()=>{}).catch(()=>{});}selQuestId=null;renderQuestSidebar();document.getElementById('quests-main-area').innerHTML='<div style=\"display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:16px;padding:40px\"><div style=\"font-size:17px;font-weight:800;color:#1d4ed8\">퀘스트를 선택하세요</div></div>';document.getElementById('quests-info-panel').innerHTML='';toast('삭제됨','i');}">퀘스트 삭제</button>`:''}
+    ${canApprove?`<button class="btn btn-r btn-sm" style="width:100%;margin-top:12px" onclick="deleteQuest(${id})">퀘스트 삭제</button>`:''}
   </div>`;
 }
 
@@ -7821,53 +7907,41 @@ function bulkApproveQuest(qid,reward){
   pending.forEach(a=>approveQuest(qid,a.uid,reward));
 }
 
-function selectQuestStu(uid,qid){
-  const s=DSTU.find(x=>x.id===uid);
-  const q=questData.find(x=>String(x.id)===String(qid));
-  if(!s||!q)return;
-  const existing=document.getElementById('md-stu-quest');
-  if(existing)existing.remove();
-  const approval=questApprovals.find(a=>a.uid===uid&&String(a.qid)===String(qid));
-  const col=`hsl(${(s.nm.charCodeAt(0)*37+s.nm.charCodeAt(s.nm.length-1)*13)%360},55%,65%)`;
-  document.body.insertAdjacentHTML('beforeend',`
-  <div class="ov on" id="md-stu-quest">
-    <div class="modal" style="width:min(400px,94vw)">
-      <div class="mhdr">
-        <div class="mtitle">퀘스트 제출 확인</div>
-        <button class="mclose" onclick="document.getElementById('md-stu-quest').remove()"><svg viewBox="0 0 9 9" fill="none" width="9" height="9"><path d="M1 1l7 7M8 1L1 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
-      </div>
-      <div style="display:flex;align-items:center;gap:14px;padding:16px;background:#f8faff;border-radius:14px;margin-bottom:16px">
-        <div style="width:44px;height:44px;border-radius:50%;background:${col};display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:900;color:#fff;flex-shrink:0">${s.nm[0]}</div>
-        <div>
-          <div style="font-size:15px;font-weight:800;color:#0f172a">${escHtml(s.nm)}</div>
-          <div style="font-size:12px;color:#64748b;margin-top:2px">📋 ${escHtml(q.title)} · +${q.reward} CC</div>
-        </div>
-      </div>
-      ${approval?`<div style="padding:10px 14px;background:#fffbeb;border:1px solid #fcd34d;border-radius:10px;font-size:13px;color:#92400e;margin-bottom:14px">⏳ 승인 대기 중인 제출이 있어요</div>`:'<div style="padding:10px 14px;background:#f1f5f9;border-radius:10px;font-size:13px;color:#64748b;margin-bottom:14px">아직 퀘스트를 제출하지 않았어요</div>'}
-      <div class="mfoot">
-        <button class="btn btn-g" onclick="document.getElementById('md-stu-quest').remove()">닫기</button>
-        ${approval?`<button class="btn btn-r btn-sm" onclick="rejectQuest('${qid}','${uid}');document.getElementById('md-stu-quest').remove()">반려</button>
-        <button class="btn btn-p btn-sm" onclick="approveQuest('${qid}','${uid}',${q.reward});document.getElementById('md-stu-quest').remove()">승인 +${q.reward} CC</button>`:''}
-      </div>
-    </div>
-  </div>`);
-}
+function selectQuestStu(uid,qid){}
 
+async function deleteQuest(id){
+  if(!confirm('퀘스트를 삭제할까요?'))return;
+  const q=questData.find(q=>String(q.id)===String(id));
+  questData=questData.filter(q=>String(q.id)!==String(id));
+  selQuestId=null;
+  renderQuestSidebar();
+  document.getElementById('quests-main-area').innerHTML='';
+  document.getElementById('quests-info-panel').innerHTML='';
+  toast('삭제됨','i');
+  // Supabase에서도 삭제
+  if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest&&q){
+    // DB에서 온 퀘스트(id가 UUID 문자열)는 SB에서 삭제
+    if(typeof q.id==='string'&&q.id.length>8){
+      sbSave(SB.from('quests').delete().eq('id',q.id),'퀘스트 삭제');
+    } else if(typeof q.id==='number'){
+      sbSave(SB.from('quests').delete().eq('id',q.id),'퀘스트 삭제');
+    }
+  }
+}
 function renderQuests(){renderQuestSidebar();}
 
 function initChatAutoClean(){
   setInterval(()=>{
     const cutoff=Date.now()-30*60*1000;
     Object.keys(DSC_MSGS).forEach(ch=>{
-      // _ts가 없는 초기 더미 메시지는 보존
-      DSC_MSGS[ch]=DSC_MSGS[ch].filter(m=>!m._ts||m._ts>cutoff);
+      DSC_MSGS[ch]=DSC_MSGS[ch].filter(m=>m._ts&&m._ts>cutoff);
     });
   },60*1000);
 }
 
 
 
-/* ═══ SHOP/AVATAR FUNCTIONS ═══ */
+/* === SHOP/AVATAR FUNCTIONS === */
 
 async function buyItem(id){
   if(checkBankruptBlock('상점 구매'))return;
@@ -7887,9 +7961,9 @@ async function buyItem(id){
   toast(`${nm} 구매! -${pr.toLocaleString()} CC`,'s');
   shopTab('items',null);
   if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest){
-    await SB.from('profiles').update({balance:CP.balance,inventory:CP.inventory}).eq('id',CU.id).then(()=>{}).catch(()=>{});
-    if(st>0) SB.from('shop_items').update({stock:item.st}).eq('id',String(id)).then(()=>{}).catch(()=>{});
-    SB.from('transactions').insert({from_id:CU.id,to_id:CU.id,amount:-pr,type:'purchase',description:nm+' 구매',class_id:CP.class_id||null}).then(()=>{}).catch(()=>{});
+    await sbSave(SB.from('profiles').update({balance:CP.balance,inventory:CP.inventory}).eq('id',CU.id),'잔액/인벤 저장');
+    if(st>0) sbSave(SB.from('shop_items').update({stock:item.st}).eq('id',String(id)),'상점 저장');
+    sbSave(SB.from('transactions').insert({from_id:CU.id,to_id:CU.id,amount:-pr,type:'purchase',description:nm+' 구매',class_id:CP.class_id||null}),'기록 저장');
   }
 }
 
@@ -7990,7 +8064,7 @@ function removeCustomAvatar(){
   shopTab('myavatar',null);
   if(document.getElementById('md-profile')?.classList.contains('on'))openProfile();
   toast('프로필 사진 제거','i');
-  if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest) SB.from('profiles').update({custom_avatar_url:null}).eq('id',CU.id).then(()=>{}).catch(()=>{});
+  if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest) sbSave(SB.from('profiles').update({custom_avatar_url:null}).eq('id',CU.id),'아바타 삭제 저장');
 }
 
 function removeCustomBanner(){
@@ -7999,7 +8073,7 @@ function removeCustomBanner(){
   shopTab('myavatar',null);
   if(document.getElementById('md-profile')?.classList.contains('on'))openProfile();
   toast('배너 이미지 제거','i');
-  if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest) SB.from('profiles').update({custom_banner_url:null}).eq('id',CU.id).then(()=>{}).catch(()=>{});
+  if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest) sbSave(SB.from('profiles').update({custom_banner_url:null}).eq('id',CU.id),'배너 삭제 저장');
 }
 
 function buyAvatar(id){
@@ -8014,8 +8088,8 @@ function buyAvatar(id){
       CP.inventory.push({id:av.id,nm:av.nm,type:'avatar',ico:av.ico,isPhoto:true});
       syncCoin();
       if(isReal){
-        SB.from('profiles').update({balance:CP.balance,inventory:CP.inventory}).eq('id',CU.id).then(()=>{}).catch(()=>{});
-        SB.from('transactions').insert({from_id:CU.id,to_id:CU.id,amount:-av.pr,type:'purchase',description:av.nm+' 구매',class_id:CP.class_id||null}).then(()=>{}).catch(()=>{});
+        sbSave(SB.from('profiles').update({balance:CP.balance,inventory:CP.inventory}).eq('id',CU.id),'구매 저장');
+        sbSave(SB.from('transactions').insert({from_id:CU.id,to_id:CU.id,amount:-av.pr,type:'purchase',description:av.nm+' 구매',class_id:CP.class_id||null}),'기록 저장');
       }
       toast(`📷 커스텀 사진 구매! 이제 사진을 업로드하세요 ✅`,'s');
     }
@@ -8036,11 +8110,11 @@ function buyAvatar(id){
     CP.equippedAvatar=av.id;
     toast(`${av.ico} ${av.nm} 구매 & 착용!`,'s');
     if(isReal){
-      SB.from('transactions').insert({from_id:CU.id,to_id:CU.id,amount:-av.pr,type:'purchase',description:av.nm+' 아바타 구매',class_id:CP.class_id||null}).then(()=>{}).catch(()=>{});
+      sbSave(SB.from('transactions').insert({from_id:CU.id,to_id:CU.id,amount:-av.pr,type:'purchase',description:av.nm+' 아바타 구매',class_id:CP.class_id||null}),'기록 저장');
     }
   }
   syncCoin();updateNavAvatar();
-  if(isReal) SB.from('profiles').update({balance:CP.balance,inventory:CP.inventory,equipped_avatar:CP.equippedAvatar}).eq('id',CU.id).then(()=>{}).catch(()=>{});
+  if(isReal) sbSave(SB.from('profiles').update({balance:CP.balance,inventory:CP.inventory,equipped_avatar:CP.equippedAvatar||null}).eq('id',CU.id),'아바타 저장');
   shopTab('myavatar',document.querySelector('#shop-tabs .admtab.on'));
   if(document.getElementById('md-profile')?.classList.contains('on'))openProfile();
 }
@@ -8055,8 +8129,8 @@ function buyBanner(id){
       CP.inventory.push({id:bn.id,nm:bn.nm,type:'banner',css:bn.css,isPhoto:true});
       syncCoin();
       if(isReal){
-        SB.from('profiles').update({balance:CP.balance,inventory:CP.inventory}).eq('id',CU.id).then(()=>{}).catch(()=>{});
-        SB.from('transactions').insert({from_id:CU.id,to_id:CU.id,amount:-bn.pr,type:'purchase',description:bn.nm+' 구매',class_id:CP.class_id||null}).then(()=>{}).catch(()=>{});
+        sbSave(SB.from('profiles').update({balance:CP.balance,inventory:CP.inventory}).eq('id',CU.id),'구매 저장');
+        sbSave(SB.from('transactions').insert({from_id:CU.id,to_id:CU.id,amount:-bn.pr,type:'purchase',description:bn.nm+' 구매',class_id:CP.class_id||null}),'기록 저장');
       }
       toast(`📷 커스텀 배너 구매! 사진을 업로드하세요 ✅`,'s');
     }
@@ -8076,11 +8150,11 @@ function buyBanner(id){
     CP.equippedBanner=bn.id;
     toast(`${bn.nm} 배너 구매 & 착용!`,'s');
     if(isReal){
-      SB.from('transactions').insert({from_id:CU.id,to_id:CU.id,amount:-bn.pr,type:'purchase',description:bn.nm+' 배너 구매',class_id:CP.class_id||null}).then(()=>{}).catch(()=>{});
+      sbSave(SB.from('transactions').insert({from_id:CU.id,to_id:CU.id,amount:-bn.pr,type:'purchase',description:bn.nm+' 배너 구매',class_id:CP.class_id||null}),'기록 저장');
     }
   }
   syncCoin();updateNavAvatar();
-  if(isReal) SB.from('profiles').update({balance:CP.balance,inventory:CP.inventory,equipped_banner:CP.equippedBanner}).eq('id',CU.id).then(()=>{}).catch(()=>{});
+  if(isReal) sbSave(SB.from('profiles').update({balance:CP.balance,inventory:CP.inventory,equipped_banner:CP.equippedBanner||null}).eq('id',CU.id),'배너 저장');
   shopTab('myavatar',document.querySelector('#shop-tabs .admtab.on'));
   if(document.getElementById('md-profile')?.classList.contains('on'))openProfile();
 }
@@ -8092,15 +8166,18 @@ function useItem(id){
   if(it.qty>1){it.qty--;}else{CP.inventory.splice(idx,1);}
   syncCoin();
   toast(`${it.nm} 사용됨 ✅`,'s');
-  if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest) SB.from('profiles').update({inventory:CP.inventory}).eq('id',CU.id).then(()=>{}).catch(()=>{});
+  if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest) sbSave(SB.from('profiles').update({inventory:CP.inventory}).eq('id',CU.id),'인벤토리 저장');
   shopTab('myitems',document.querySelector('#shop-tabs .admtab.on'));
 }
 
 function saveBio(){
   const v=(document.getElementById('bio-input')?.value||'').trim();
   CP.bio=v;
-  toast('소개 저장! ✅','s');
-  if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest) SB.from('profiles').update({bio:v}).eq('id',CU.id).then(()=>{}).catch(()=>{});
+  if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest){
+    sbSave(SB.from('profiles').update({bio:v}).eq('id',CU.id),'소개').then(ok=>{
+      if(ok) toast('소개 저장! ✅','s');
+    });
+  } else { toast('소개 저장! ✅','s'); }
 }
 
 function openListMarket(){
@@ -8144,12 +8221,16 @@ async function confirmListMarket(){
   marketListings.unshift({id:localId,seller:CP.name||'나',nm:it.nm,pr,itemId:selId,ico:it.ico||'🏷️',ts:'방금'});
   if(SB&&CU&&CP?.class_id&&CP?.id!=='demo'&&!CP?._isGuest){
     // 인벤토리 저장
-    SB.from('profiles').update({inventory:CP.inventory}).eq('id',CU.id).then(()=>{}).catch(()=>{});
+    sbSave(SB.from('profiles').update({inventory:CP.inventory}).eq('id',CU.id),'인벤토리 저장');
     // market_listings 테이블에 저장
-    const{data:ml}=await SB.from('market_listings').insert({
-      class_id:CP.class_id,seller_id:CU.id,seller_name:CP.name||'판매자',
-      item_id:selId,item_name:it.nm,item_icon:it.ico||'🏷️',price:pr,status:'active'
-    }).select().single().catch(()=>({data:null}));
+    let ml=null;
+    try{
+      const{data:_ml,error:_mle}=await SB.from('market_listings').insert({
+        class_id:CP.class_id,seller_id:CU.id,seller_name:CP.name||'판매자',
+        item_id:selId,item_name:it.nm,item_icon:it.ico||'🏷️',price:pr,status:'active'
+      }).select().single();
+      if(!_mle)ml=_ml;
+    }catch(_){}
     // 로컬 id를 DB id로 교체
     if(ml?.id){
       const idx=marketListings.findIndex(x=>x.id===localId);
@@ -8172,11 +8253,21 @@ async function buyFromMarket(id){
   syncCoin();shopTab('market',null);
   toast(`${m.nm} 구매! -${m.pr.toLocaleString()} CC`,'s');
   if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest){
-    SB.from('profiles').update({balance:CP.balance,inventory:CP.inventory}).eq('id',CU.id).then(()=>{}).catch(()=>{});
-    SB.from('transactions').insert({from_id:CU.id,to_id:CU.id,amount:-m.pr,type:'purchase',description:`중고 구매: ${m.nm} (판매자: ${m.seller})`,class_id:CP.class_id||null}).then(()=>{}).catch(()=>{});
+    // 구매자 잔액/인벤토리 저장
+    sbSave(SB.from('profiles').update({balance:CP.balance,inventory:CP.inventory}).eq('id',CU.id),'중고구매 저장');
+    // 거래 기록 (구매자 차감)
+    sbSave(SB.from('transactions').insert({from_id:CU.id,to_id:m.sellerId||null,amount:-m.pr,type:'purchase',description:`중고 구매: ${m.nm} (판매자: ${m.seller})`,class_id:CP.class_id||null}),'거래 기록');
+    // 판매자 코인 지급
+    if(m.sellerId&&m.sellerId!==CU.id){
+      let _sv={data:null};try{_sv=await SB.from('profiles').select('balance').eq('id',m.sellerId).single();}catch(_){}
+      if(_sv.data){
+        sbSave(SB.from('profiles').update({balance:(_sv.data.balance||0)+m.pr}).eq('id',m.sellerId),'판매자 코인 지급');
+        sbSave(SB.from('transactions').insert({from_id:CU.id,to_id:m.sellerId,amount:m.pr,type:'transfer',description:`중고 판매: ${m.nm}`,class_id:CP.class_id||null}),'판매 기록');
+      }
+    }
     // market_listings 상태 sold로 업데이트 (UUID인 경우만)
     if(typeof id==='string'&&id.includes('-')){
-      SB.from('market_listings').update({status:'sold'}).eq('id',id).then(()=>{}).catch(()=>{});
+      sbSave(SB.from('market_listings').update({status:'sold'}).eq('id',id),'마켓 저장');
     }
   }
 }
@@ -8217,7 +8308,7 @@ function loadJobs(){
 }
 
 
-/* ═══ CORE MISSING FUNCTIONS ═══ */
+/* === CORE MISSING FUNCTIONS === */
 function showBanner(msg,dur){
   let el=document.getElementById('class-banner');
   if(!el){document.body.insertAdjacentHTML('beforeend','<div id="class-banner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:9999;padding:13px 24px;background:linear-gradient(135deg,#1d4ed8,#3b82f6);color:#fff;font-size:14px;font-weight:700;text-align:center;box-shadow:0 4px 20px rgba(29,78,216,.4)"></div>');el=document.getElementById('class-banner');}
@@ -8226,7 +8317,7 @@ function showBanner(msg,dur){
 }
 function clearGuestData(){
   const keep=['cw_school'];
-  Object.keys(localStorage).forEach(k=>{if((k.startsWith('cw_')||k.startsWith('plg_')||k.startsWith('seat_'))&&!keep.includes(k))localStorage.removeItem(k);});
+  try{Object.keys(localStorage).forEach(k=>{if((k.startsWith('cw_')||k.startsWith('plg_')||k.startsWith('seat_'))&&!keep.includes(k))localStorage.removeItem(k);});}catch(_){}
   try{boardPosts=[];questApprovals=[];if(typeof taxHistory!=='undefined')taxHistory=[];if(typeof nationalPosts!=='undefined')nationalPosts=[];}catch(_){}
 }
 function jobsTab(tab,btn){
@@ -8281,7 +8372,7 @@ function jobsTab(tab,btn){
 function admOpenQuestModal(){openMod('md-addq');}
 
 
-/* ═══ RESTORED FROM BACKUP ═══ */
+/* === RESTORED FROM BACKUP === */
 
 
 
@@ -8331,7 +8422,7 @@ function getAllJobs(){
   return [...DJOBS,...cj.map((j,i)=>({...j,id:'c'+i,custom:true}))];
 }
 
-/* ══ PLUGIN EDITOR HELPERS ══ */
+/* == PLUGIN EDITOR HELPERS == */
 function updateLineNums(ta){
   const lines=ta.value.split('\n').length;
   const el=document.getElementById('ped-line-nums');
@@ -8465,13 +8556,10 @@ function pedTest(){
       deduct:(a,r)=>{logs.push('💸 -'+a+' CC ('+(r||'차감')+')');return(CP.balance||0)>=a;},
       announce:(m)=>logs.push('📢 '+m),
       save:(k,v)=>{
-        localStorage.setItem('plg_'+k,JSON.stringify(v));
-        if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest){
-          SB.from('profiles').select('plugin_data').eq('id',CU.id).single()
-            .then(({data})=>{const merged={...(data?.plugin_data||{}),[k]:v};SB.from('profiles').update({plugin_data:merged}).eq('id',CU.id).catch(()=>{});}).catch(()=>{});
-        }
+        try{localStorage.setItem('plg_'+k,JSON.stringify(v));}catch(_){}
+        if(SB&&CP?.class_id&&CP?.id!=='demo'&&!CP?._isGuest){mergeClassSettings({['plg_'+k]:v}).catch(()=>{});}
       },
-      load:(k,d)=>{try{const v=localStorage.getItem('plg_'+k);if(v!==null)return JSON.parse(v)||d;}catch(_){}return d;},
+      load:(k,d)=>{try{return JSON.parse(localStorage.getItem('plg_'+k))||d;}catch(_){return d;}},
       getStudents:()=>DSTU,random:(mn,mx)=>Math.floor(Math.random()*(mx-mn+1))+mn,
       pick:(a)=>a[Math.floor(Math.random()*a.length)],shuffle:(a)=>[...a].sort(()=>Math.random()-.5),
       stockData,now:()=>new Date(),today:()=>new Date().toISOString().slice(0,10),
@@ -8488,7 +8576,7 @@ function pedTest(){
   }
 }
 
-/* ── 선생님 전국 커뮤니티 ── */
+/* -- 선생님 전국 커뮤니티 -- */
 let teacherPosts=[];
 // teacherPosts: DB에서 로드
 function renderNationalTeacherComm(body){
@@ -8574,7 +8662,9 @@ async function submitNationalPost(type){
         class_id:null,
         author_id:CU.id,
         author_name:CP?.name||'익명',
-        content:txt}).select('id').single();
+        content:txt,
+        school:(type==='teacher'?'__teacher__:':'')+(CP?.school||CP?.class_name||'')
+      }).select('id').single();
       if(error)throw error;
       savedId=inserted?.id;
     }catch(e){
@@ -8585,7 +8675,7 @@ async function submitNationalPost(type){
     }
   }
   // 로컬 배열에 추가
-  const localPost={id:savedId||Date.now(),author:CP?.name||'익명',content:txt,likes:[],comments:[],ts,col};
+  const localPost={id:savedId||Date.now(),author:CP?.name||'익명',school:CP?.school||CP?.class_name||'',content:txt,likes:[],comments:[],ts,col};
   if(isTeacher){
     teacherPosts.unshift({...localPost,role:'teacher'});
   } else {
@@ -8604,14 +8694,14 @@ function toggleTeacherLike(id){
   const el=document.getElementById('tp-'+id);
   if(el){const tmp=document.createElement('div');tmp.innerHTML=renderTeacherPost(p);el.replaceWith(tmp.firstChild);}
   if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest&&typeof p.id==='string'&&p.id.length>10){
-    SB.from('board_posts').update({likes:p.likes}).eq('id',p.id).then(()=>{}).catch(()=>{});
+    sbSave(SB.from('board_posts').update({likes:p.likes}).eq('id',p.id),'게시판 저장');
   }
 }
 function deleteTeacherPost(id){
   const p=teacherPosts.find(x=>x.id===id);
   teacherPosts=teacherPosts.filter(p=>p.id!==id);
   if(SB&&CU&&CP?.id!=='demo'&&p&&typeof p.id==='string'&&p.id.length>10){
-    SB.from('board_posts').delete().eq('id',p.id).eq('author_id',CU.id).then(()=>{}).catch(()=>{});
+    sbSave(SB.from('board_posts').delete().eq('id',p.id).eq('author_id',CU.id),'게시판 저장');
   }
   document.getElementById('tp-'+id)?.remove();
   toast('삭제됨','i');
@@ -8619,45 +8709,44 @@ function deleteTeacherPost(id){
 
 function buyStock(tk,qty){
   const s=stockData.find(s=>s.tk===tk);if(!s||!qty||qty<1)return;
-  if(CP?.id==='demo'||CP?._isGuest){toast('체험 계정은 저장 안 돼요','i');return;}
   const cost=Math.round(s.pr*qty);
   if((CP.balance||0)<cost){toast('잔액 부족 (필요: '+cost.toLocaleString()+' CC)','e');return;}
   CP.balance-=cost;
+  // 보유 추가
   if(!CP.stockHoldings)CP.stockHoldings={};
   if(!CP.stockHoldings[tk])CP.stockHoldings[tk]={qty:0,avgPrice:0};
   const h=CP.stockHoldings[tk];
   h.avgPrice=Math.round((h.avgPrice*h.qty+s.pr*qty)/(h.qty+qty));
   h.qty+=qty;
   syncCoin();
-  toast(s.nm+' '+qty+'주 매수! -'+cost.toLocaleString()+' CC','s');
+  toast(`📈 ${s.nm} ${qty}주 매수 (-${cost.toLocaleString()} CC)`,'s');
   closeMod('md-stock');
-  if(document.getElementById('econ-body')&&typeof renderStocksTab==='function')renderStocksTab(document.getElementById('econ-body'));
-  if(SB&&CU){
-    SB.from('profiles').update({balance:CP.balance,stock_holdings:CP.stockHoldings}).eq('id',CU.id).then(()=>{}).catch(()=>{});
-    SB.from('transactions').insert({from_id:CU.id,to_id:CU.id,amount:-cost,type:'stock',description:s.nm+' '+qty+'주 매수',class_id:CP.class_id||null}).then(()=>{}).catch(()=>{});
+  // Supabase 거래 기록
+  if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest){
+    SB.from('transactions').insert({from_id:CU.id,to_id:CU.id,amount:-cost,type:'stock_buy',description:`${s.nm} ${qty}주 매수`,class_id:CP.class_id||null}).then(()=>{},()=>{});
   }
+  if(document.getElementById('econ-body')&&typeof renderStocksTab==='function')renderStocksTab(document.getElementById('econ-body'));
 }
 function sellStock(tk,qty){
   const s=stockData.find(s=>s.tk===tk);if(!s||!qty||qty<1)return;
-  if(CP?.id==='demo'||CP?._isGuest){toast('체험 계정은 저장 안 돼요','i');return;}
   const h=CP.stockHoldings?.[tk];
-  if(!h||h.qty<qty){toast('보유 주식 부족 (보유: '+(h?.qty||0)+'주)','e');return;}
+  if(!h||h.qty<qty){toast(`보유 주식 부족 (보유: ${h?.qty||0}주)`,'e');return;}
   const earn=Math.round(s.pr*qty);
   const profit=Math.round((s.pr-h.avgPrice)*qty);
   h.qty-=qty;
   if(h.qty<=0)delete CP.stockHoldings[tk];
   CP.balance=(CP.balance||0)+earn;
   syncCoin();
-  toast(s.nm+' '+qty+'주 매도! +'+earn.toLocaleString()+' CC (손익: '+(profit>=0?'+':'')+profit.toLocaleString()+')','s');
+  toast(`📉 ${s.nm} ${qty}주 매도 (+${earn.toLocaleString()} CC, 손익: ${profit>=0?'+':''}${profit.toLocaleString()})`,'s');
   closeMod('md-stock');
-  if(document.getElementById('econ-body')&&typeof renderStocksTab==='function')renderStocksTab(document.getElementById('econ-body'));
-  if(SB&&CU){
-    SB.from('profiles').update({balance:CP.balance,stock_holdings:CP.stockHoldings}).eq('id',CU.id).then(()=>{}).catch(()=>{});
-    SB.from('transactions').insert({from_id:CU.id,to_id:CU.id,amount:earn,type:'stock',description:s.nm+' '+qty+'주 매도',class_id:CP.class_id||null}).then(()=>{}).catch(()=>{});
+  // Supabase 거래 기록
+  if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest){
+    SB.from('transactions').insert({from_id:CU.id,to_id:CU.id,amount:earn,type:'stock_sell',description:`${s.nm} ${qty}주 매도 (손익: ${profit>=0?'+':''}${profit})`,class_id:CP.class_id||null}).then(()=>{},()=>{});
   }
+  if(document.getElementById('econ-body')&&typeof renderStocksTab==='function')renderStocksTab(document.getElementById('econ-body'));
 }
 
-/* ══ 계정 설정 모달 ══ */
+/* == 계정 설정 모달 == */
 function openAccountSettings(){
   if(CP?.id==='demo'||CP?._isGuest){toast('체험 계정은 계정 설정을 변경할 수 없어요','e');return;}
   const id='md-account';
@@ -8713,7 +8802,7 @@ async function changeDisplayName(){
   if(CP?.id==='demo'||CP?._isGuest){toast('체험 계정은 변경할 수 없어요','e');return;}
   if(!SB||!CU){toast('로그인 후 이용하세요','e');return;}
   CP.name=nm;
-  const{error}=await SB.from('profiles').update({name:nm}).eq('id',CU.id).catch(e=>({error:e}));
+  let error=null;try{const r=await SB.from('profiles').update({name:nm}).eq('id',CU.id);error=r.error||null;}catch(e){error=e;}
   if(error){toast('변경 실패: '+error.message,'e');return;}
   updateNavAvatar();
   buildNav();
@@ -8744,7 +8833,7 @@ async function changeEmail(){
   toast('이메일 변경 확인 메일이 발송됐어요 📧','s');
 }
 
-/* ══ 복수 학급 만들기 ══ */
+/* == 복수 학급 만들기 == */
 let myClasses=[]; // 내 학급 목록
 
 async function loadMyClasses(){
@@ -8768,7 +8857,9 @@ async function createNewClass(){
   const{data,error}=await SB.from('classes').insert({
     name:nm.trim(),
     teacher_id:CU.id,
-    code}).select().single();
+    code,
+    school:CP?.school||''
+  }).select().single();
   if(error){toast('학급 생성 실패: '+error.message,'e');return;}
   toast(`✅ ${nm} 학급 생성! 코드: ${code}`,'s');
   // 현재 학급 변경 여부 확인
@@ -8792,7 +8883,7 @@ async function switchClass(classId,className,code){
   if(!SB||!CU)return;
   CP.class_id=classId;
   CP.class_name=className;
-  await SB.from('profiles').update({class_id:classId,class_name:className}).eq('id',CU.id).then(()=>{}).catch(()=>{});
+  await sbSave(SB.from('profiles').update({class_id:classId,class_name:className}).eq('id',CU.id),'학급 가입 저장');
   buildNav();buildSidebar();
   toast(`📚 "${className}" 학급으로 전환됐어요`,'s');
 }
@@ -8846,6 +8937,35 @@ document.addEventListener('DOMContentLoaded', function(){
     if(typeof init==='function') init();
   }
 });
+
+// 드롭다운 외부 클릭 시 닫기
+document.addEventListener('click', function(e){
+  if(!e.target.closest('.cs')){
+    document.querySelectorAll('.cs-drop.on').forEach(d=>{
+      d.classList.remove('on');d.style.display='none';
+      const b=d.closest('.cs')?.querySelector('.cs-btn');
+      if(b)b.classList.remove('open');
+    });
+  }
+}, true);
+// 스크롤 시 드롭다운 위치 재계산
+window.addEventListener('scroll',()=>{
+  document.querySelectorAll('.cs-drop.on').forEach(d=>{
+    const b=d.closest('.cs')?.querySelector('.cs-btn');
+    if(!b)return;
+    const rect=b.getBoundingClientRect();
+    const dh=d.offsetHeight||120;
+    const spaceBelow=window.innerHeight-rect.bottom;
+    d.style.left=rect.left+'px';
+    d.style.width=Math.max(rect.width,160)+'px';
+    if(spaceBelow<dh+8&&rect.top>dh+8){
+      d.style.top='auto';d.style.bottom=(window.innerHeight-rect.top+4)+'px';
+    } else {
+      d.style.bottom='auto';d.style.top=(rect.bottom+4)+'px';
+    }
+  });
+}, true);
 </script>
+
 </body>
 </html>

@@ -3167,17 +3167,37 @@ async function fetchRealStocks(){
       if(results.length>0){stockData=results;stockIsReal=true;return true;}
     }catch(_){}
   }
-  // https 환경 → allorigins 시도
+  // https 환경 → 여러 CORS 프록시 순서대로 시도
+  const STOCK_PROXIES=[
+    (url)=>`https://corsproxy.io/?url=${encodeURIComponent(url)}`,
+    (url)=>`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+    (url)=>`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
+  ];
+  async function fetchYahoo(tk){
+    const url=`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(tk)}?interval=1d&range=1d`;
+    for(const mkProxy of STOCK_PROXIES){
+      try{
+        const r=await fetch(mkProxy(url),{signal:AbortSignal.timeout(5000)});
+        if(!r.ok)continue;
+        let parsed;
+        const ct=r.headers.get('content-type')||'';
+        if(ct.includes('json')){
+          const j=await r.json();
+          // allorigins wraps in {contents:'...'}
+          parsed=j.contents?JSON.parse(j.contents):j;
+        } else {
+          parsed=JSON.parse(await r.text());
+        }
+        const q=parsed?.chart?.result?.[0]?.meta;
+        if(q)return q;
+      }catch(_){continue;}
+    }
+    return null;
+  }
   try{
     const results=[];
     for(const s of REAL_STOCKS){
-      const url=`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(s.tk)}?interval=1d&range=1d`;
-      const proxy=`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
-      const r=await fetch(proxy,{signal:AbortSignal.timeout(4000)});
-      if(!r.ok)continue;
-      const json=await r.json();
-      const parsed=JSON.parse(json.contents||'{}');
-      const q=parsed?.chart?.result?.[0]?.meta;
+      const q=await fetchYahoo(s.tk);
       if(q){const pr=q.regularMarketPrice||q.previousClose;const prev=q.chartPreviousClose||q.previousClose||pr;const ch=prev?+((pr-prev)/prev*100).toFixed(2):0;results.push({tk:s.tk,nm:s.nm,pr,ch,currency:q.currency||'USD'});}
     }
     if(results.length>0){stockData=results;stockIsReal=true;return true;}
@@ -6752,21 +6772,20 @@ async function loadNationalPosts(){
   // 데모/게스트 계정은 전국 커뮤니티 로드 안 함
   if(!SB||!CU||CP?.id==='demo'||CP?._isGuest){nationalPosts=[];return;}
   try{
-    // school이 null이거나 '__teacher__'로 시작하지 않는 글 = 학생 글
+    // __national__: prefix로 전국 학생 글 식별 (class_id NOT NULL 대응)
     const{data}=await SB.from('board_posts')
       .select('id,author_id,author_name,content,created_at,school,likes')
-      .is('class_id',null)
-      .not('school','like','__teacher__%')
+      .like('school','__national__%')
       .order('created_at',{ascending:false}).limit(50);
     if(data&&data.length){
       nationalPosts=data.map(p=>({
         id:p.id,
         author:p.author_name||'익명',
-        school:p.school||'',
+        school:(p.school||'').replace(/^__national__:/,'').replace(/^__teacher__:/,''),
         content:p.content||'',
         col:`hsl(${(p.author_name||'').split('').reduce((a,c)=>a+c.charCodeAt(0),0)%360},55%,45%)`,
         ts:new Date(p.created_at).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}),
-        likes:Array.isArray(p.likes)?p.likes:(p.likes?JSON.parse(p.likes):[]),
+        likes:(()=>{try{return Array.isArray(p.likes)?p.likes:(p.likes?JSON.parse(p.likes):[]);}catch(_){return[];}})(),
         comments:[]
       }));
     } else {
@@ -6807,10 +6826,10 @@ function commTab(tab,btn){
   if(tab==='national-teacher'){
     // 선생님 커뮤 DB 로드
     if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest){
-      SB.from('board_posts').select('id,author_id,author_name,content,created_at,school,likes').is('class_id',null).like('school','__teacher__%').order('created_at',{ascending:false}).limit(50)
+      SB.from('board_posts').select('id,author_id,author_name,content,created_at,school,likes').like('school','__teacher__%').order('created_at',{ascending:false}).limit(50)
         .then(({data,error})=>{
           if(!error&&data&&data.length){
-            teacherPosts=data.map(p=>({id:p.id,author:p.author_name||'선생님',school:(p.school||'').replace(/^__teacher__:/,''),col:'#1d4ed8',content:p.content||'',ts:new Date(p.created_at).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}),likes:Array.isArray(p.likes)?p.likes:(p.likes?JSON.parse(p.likes):[]),comments:[]}));
+            teacherPosts=data.map(p=>({id:p.id,author:p.author_name||'선생님',school:(p.school||'').replace(/^__teacher__:/,''),col:'#1d4ed8',content:p.content||'',ts:new Date(p.created_at).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}),likes:(()=>{try{return Array.isArray(p.likes)?p.likes:(p.likes?JSON.parse(p.likes):[]);}catch(_){return[];}})(),comments:[]}));
             const body2=document.getElementById('comm-body');
             if(body2)renderNationalTeacherComm(body2);
           }
@@ -7841,7 +7860,9 @@ async function loadQuests(){
     if(CP.role==='teacher'||CP.role==='dev'||CP.role==='superadmin'){
       let _pend={data:[]};
       try{
-        const qids=questData.map(q=>String(q.id)).filter(Boolean);
+        // UUID 형식만 필터 (숫자 ID는 PostgREST가 UUID 파싱 실패 → 400)
+        const UUID_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        const qids=questData.map(q=>String(q.id)).filter(id=>UUID_RE.test(id));
         if(qids.length>0){
           _pend=await SB.from('quest_completions')
             .select('quest_id,user_id,profiles(name)')
@@ -8786,18 +8807,20 @@ async function submitNationalPost(type){
   let savedId=null;
   if(SB&&CU){
     try{
-      // insert 와 select 분리 - 일부 Supabase 환경에서 insert().select().single() 400 오류 방지
+      // class_id NOT NULL 제약 대응: 학급 ID 사용, school prefix로 전국/교사 구분
+      const schoolVal=(type==='teacher'?'__teacher__:':'__national__:')+(CP?.school||CP?.class_name||'');
       const{error:insErr}=await SB.from('board_posts').insert({
         author_id:CU.id,
         author_name:CP?.name||'익명',
         content:txt,
-        school:(type==='teacher'?'__teacher__:':'')+(CP?.school||CP?.class_name||'')
-        // class_id 생략 → DB default null 적용
+        school:schoolVal,
+        likes:[],
+        class_id:CP?.class_id||null
       });
       if(insErr)throw insErr;
       // 방금 내가 쓴 글 id 조회
       const{data:myPost}=await SB.from('board_posts')
-        .select('id').eq('author_id',CU.id).is('class_id',null)
+        .select('id').eq('author_id',CU.id).like('school', isTeacher?'__teacher__%':'__national__%')
         .order('created_at',{ascending:false}).limit(1).maybeSingle();
       savedId=myPost?.id||null;
     }catch(e){

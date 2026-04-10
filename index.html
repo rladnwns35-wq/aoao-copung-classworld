@@ -3154,20 +3154,7 @@ async function fetchRealStocks(){
     if(typeof renderStocks==='function')renderStocks();
     return true;
   }
-  // 서버(localhost/http) → /api/stocks 프록시 사용
-  if(location.hostname==='localhost'||location.hostname==='127.0.0.1'){
-    try{
-      const results=[];
-      for(const s of REAL_STOCKS){
-        const r=await fetch(`/api/stocks/${encodeURIComponent(s.tk)}`,{signal:AbortSignal.timeout(5000)});
-        if(!r.ok)continue;
-        const d=await r.json();
-        if(!d.error)results.push({tk:s.tk,nm:s.nm,pr:parseFloat(d.price)||s.pr,ch:parseFloat(d.change)||0,currency:d.currency||'USD'});
-      }
-      if(results.length>0){stockData=results;stockIsReal=true;return true;}
-    }catch(_){}
-  }
-  // Supabase stocks 테이블에서 최신 가격 가져오기 (외부 CORS 의존 없음)
+  // Supabase stocks 테이블에서 최신 가격 가져오기 (외부 CORS 의존 없음) — Yahoo/allorigins 등 외부 CORS 프록시 제거됨
   if(SB&&CP?.id!=='demo'&&!CP?._isGuest){
     try{
       const{data:sRows}=await SB.from('stocks').select('ticker,name,price,change_pct');
@@ -3240,12 +3227,12 @@ function initStocks(){
 function renderStocks(){
   const isReal=stockIsReal;
   const _sw=document.getElementById('stocks-inner')||document.getElementById('stocks-wrap');if(!_sw)return;_sw.innerHTML=`
-    ${isReal?`<div style="padding:8px 13px 4px;display:flex;align-items:center;gap:6px"><div class="stk-live-badge"><div class="stk-live-dot"></div>실시간</div><span style="font-size:11px;color:var(--text4)">Yahoo Finance</span></div>`:''}
+    ${isReal?`<div style="padding:8px 13px 4px;display:flex;align-items:center;gap:6px"><div class="stk-live-badge"><div class="stk-live-dot"></div>실시간</div><span style="font-size:11px;color:var(--text4)">실시간 데이터</span></div>`:''}
     ${stockData.map(s=>{
       const prFmt=s.currency==='KRW'?(s.pr||0).toLocaleString('ko-KR')+'원':((s.pr||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}))+'$';
       return `<div class="stk-row" onclick="openStockModal('${s.tk}')"><div class="stk-tick">${s.tk.replace('.KS','').replace('.KQ','')}</div><div class="stk-name">${s.nm}</div><div class="stk-price">${prFmt}</div><div class="stk-chg ${s.ch>=0?'cup':'cdn'}">${s.ch>=0?'▲':'▼'}${Math.abs(s.ch)}%</div></div>`;
     }).join('')}
-    ${isReal?`<div class="stk-src-note">※ 데이터: Yahoo Finance / 교육용 참고 목적</div>`:'<div class="stk-src-note">※ 실시간 연결 실패 시 시뮬레이션 데이터</div>'}`;
+    ${isReal?`<div class="stk-src-note">※ 교육용 참고 목적</div>`:'<div class="stk-src-note">※ 시뮬레이션 데이터</div>'}`;
 }
 async function renderTx(){
   const wrap=document.getElementById('tx-wrap');
@@ -4485,7 +4472,26 @@ async function submitAddStudent(){
         emailRedirectTo:location.origin
       }
     });
-    if(signUpErr)throw signUpErr;
+    // "User already registered" → 이미 존재하는 계정이면 profiles만 upsert
+    if(signUpErr){
+      if(signUpErr.message&&(signUpErr.message.includes('already registered')||signUpErr.message.includes('already been registered')||signUpErr.code==='user_already_exists')){
+        // 기존 계정을 profiles에서 찾아 반영
+        const{data:existing}=await SB.from('profiles').select('id').eq('email',email).maybeSingle();
+        if(existing?.id){
+          const acct=('0000'+Math.floor(Math.random()*10000)).slice(-4)+'-'+('0000'+Math.floor(Math.random()*10000)).slice(-4);
+          await SB.from('profiles').upsert({id:existing.id,name:nm,email,role:'student',class_id:CP.class_id,class_name:CP.class_name||'',balance:500,job:'학생',credit_score:700,credit_grade:'B',account_number:acct,school:CP.school||''},{onConflict:'id'});
+          DSTU.push({id:existing.id,nm,bal:500,gr:'B',job:'학생',sus:false,inventory:[]});
+          closeMod('md-add-student');
+          toast('✅ '+nm+' 등록 완료 (기존 계정 연결)','s');
+          admTab('students',null);
+          return;
+        }else{
+          showErr('이미 등록된 이메일입니다. 다른 이메일을 사용하세요.');
+          return;
+        }
+      }
+      throw signUpErr;
+    }
     const newUid=authData?.user?.id;
     if(!newUid)throw new Error('계정 생성 실패 (uid 없음)');
 

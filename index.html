@@ -6752,16 +6752,17 @@ async function loadNationalPosts(){
   // 데모/게스트 계정은 전국 커뮤니티 로드 안 함
   if(!SB||!CU||CP?.id==='demo'||CP?._isGuest){nationalPosts=[];return;}
   try{
+    // school이 null이거나 '__teacher__'로 시작하지 않는 글 = 학생 글
     const{data}=await SB.from('board_posts')
       .select('id,author_id,author_name,content,created_at,school,likes')
       .is('class_id',null)
-      .or('school.is.null,school.not.like.__teacher__%')
+      .not('school','like','__teacher__%')
       .order('created_at',{ascending:false}).limit(50);
     if(data&&data.length){
       nationalPosts=data.map(p=>({
         id:p.id,
         author:p.author_name||'익명',
-        school:(p.school||'').replace(/^__teacher__:/,''),
+        school:p.school||'',
         content:p.content||'',
         col:`hsl(${(p.author_name||'').split('').reduce((a,c)=>a+c.charCodeAt(0),0)%360},55%,45%)`,
         ts:new Date(p.created_at).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}),
@@ -7839,10 +7840,15 @@ async function loadQuests(){
     // 선생님: 대기 중인 제출 로드
     if(CP.role==='teacher'||CP.role==='dev'||CP.role==='superadmin'){
       let _pend={data:[]};
-      try{_pend=await SB.from('quest_completions')
-        .select('quest_id,user_id,profiles(name)')
-        .eq('status','pending')
-        .in('quest_id',questData.map(q=>String(q.id)));}catch(_){}
+      try{
+        const qids=questData.map(q=>String(q.id)).filter(Boolean);
+        if(qids.length>0){
+          _pend=await SB.from('quest_completions')
+            .select('quest_id,user_id,profiles(name)')
+            .eq('status','pending')
+            .in('quest_id',qids);
+        }
+      }catch(_){}
       const{data:pending}=_pend;
       questApprovals=[];
       (pending||[]).forEach(p=>{
@@ -8780,15 +8786,20 @@ async function submitNationalPost(type){
   let savedId=null;
   if(SB&&CU){
     try{
-      const{data:inserted,error}=await SB.from('board_posts').insert({
-        class_id:null,
+      // insert 와 select 분리 - 일부 Supabase 환경에서 insert().select().single() 400 오류 방지
+      const{error:insErr}=await SB.from('board_posts').insert({
         author_id:CU.id,
         author_name:CP?.name||'익명',
         content:txt,
         school:(type==='teacher'?'__teacher__:':'')+(CP?.school||CP?.class_name||'')
-      }).select('id').single();
-      if(error)throw error;
-      savedId=inserted?.id;
+        // class_id 생략 → DB default null 적용
+      });
+      if(insErr)throw insErr;
+      // 방금 내가 쓴 글 id 조회
+      const{data:myPost}=await SB.from('board_posts')
+        .select('id').eq('author_id',CU.id).is('class_id',null)
+        .order('created_at',{ascending:false}).limit(1).maybeSingle();
+      savedId=myPost?.id||null;
     }catch(e){
       console.error('커뮤니티 글쓰기 오류:',e);
       if(errEl){errEl.textContent='저장 실패: '+(e.message||'서버 오류');errEl.style.display='block';}

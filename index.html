@@ -7150,50 +7150,64 @@ function deleteUserPlugin(id){
 /* -- 실행 & 설치 -- */
 function runPluginCode(code){
   if(!code||typeof code!=='string'){toast('플러그인 코드가 없어요','e');return;}
+  // 1단계: 문법 사전 검사 (SyntaxError 사전 차단 → Uncaught 방지)
+  try{ new Function(code); }catch(synErr){
+    toast('플러그인 문법 오류: '+synErr.message,'e');
+    console.error('[Plugin SyntaxError]',synErr);
+    return;
+  }
+  const _pluginAPI={
+    CP,DSTU,questData,
+    toast,syncCoin,goPage,openMod,closeMod,showBanner,
+    reward:(amt,reason)=>{if((CP.balance||0)<amt){toast('잔액 부족','e');return false;}CP.balance-=amt;syncCoin();toast('💸 -'+amt+' CC ('+(reason||'차감')+')', 'i');return true;},
+    deduct:(amt,reason)=>{if((CP.balance||0)<amt){toast('잔액 부족','e');return false;}CP.balance-=amt;syncCoin();return true;},
+    give:(amt,reason)=>{CP.balance=(CP.balance||0)+amt;syncCoin();toast('💰 +'+amt+' CC ('+(reason||'지급')+')', 's');},
+    getStudents:()=>DSTU,
+    getStudent:(nm)=>DSTU.find(s=>s.nm===nm),
+    announce:(msg)=>showBanner(msg),
+    save:(key,val)=>{
+      try{localStorage.setItem('plg_'+key,JSON.stringify(val));}catch(_){}
+      if(SB&&CP?.class_id&&CP?.id!=='demo'&&!CP?._isGuest){
+        mergeClassSettings({['plg_'+key]:val}).catch(()=>{});
+      }
+    },
+    load:(key,def)=>{
+      try{return JSON.parse(localStorage.getItem('plg_'+key))??def;}catch(_){return def;}
+    },
+    input:(label,def)=>prompt(label,def||''),
+    confirm:(msg)=>confirm(msg),
+    alert:(msg)=>alert(msg),
+    addQuest:(title,desc,reward)=>{DQUESTS.push({id:Date.now(),title,desc,reward,status:'active'});toast('퀘스트 추가됨','s');},
+    sendMessage:(msg)=>sendDscMsg&&sendDscMsg(msg),
+    random:(min,max)=>Math.floor(Math.random()*(max-min+1))+min,
+    pick:(arr)=>arr[Math.floor(Math.random()*arr.length)],
+    shuffle:(arr)=>[...arr].sort(()=>Math.random()-.5),
+    stockData,
+    now:()=>new Date(),
+    today:()=>new Date().toISOString().slice(0,10),
+  };
+  // 2단계: AsyncFunction으로 실행 → async/await 플러그인 + 런타임 에러 모두 catch
   try{
-    const api={
-      CP,DSTU,questData,
-      toast,syncCoin,goPage,openMod,closeMod,showBanner,
-      reward:(amt,reason)=>{if((CP.balance||0)<amt){toast('잔액 부족','e');return false;}CP.balance-=amt;syncCoin();toast(`💸 -${amt} CC (${reason||'차감'})`,'i');return true;},
-      deduct:(amt,reason)=>{if((CP.balance||0)<amt){toast('잔액 부족','e');return false;}CP.balance-=amt;syncCoin();return true;},
-      give:(amt,reason)=>{CP.balance=(CP.balance||0)+amt;syncCoin();toast(`💰 +${amt} CC (${reason||'지급'})`,'s');},
-      getStudents:()=>DSTU,
-      getStudent:(nm)=>DSTU.find(s=>s.nm===nm),
-      announce:(msg)=>showBanner(msg),
-      save:(key,val)=>{
-        try{localStorage.setItem('plg_'+key,JSON.stringify(val));}catch(_){}
-        // Supabase classes.settings에도 저장
-        if(SB&&CP?.class_id&&CP?.id!=='demo'&&!CP?._isGuest){
-          mergeClassSettings({['plg_'+key]:val}).catch(()=>{});
-        }
-      },
-      load:(key,def)=>{
-        // Supabase에서 로드 시도 (비동기는 복잡하므로 localStorage 우선)
-        try{return JSON.parse(localStorage.getItem('plg_'+key))??def;}catch(_){return def;}
-      },
-      input:(label,def)=>prompt(label,def||''),
-      confirm:(msg)=>confirm(msg),
-      alert:(msg)=>alert(msg),
-      addQuest:(title,desc,reward)=>{DQUESTS.push({id:Date.now(),title,desc,reward,status:'active'});toast('퀘스트 추가됨','s');},
-      sendMessage:(msg)=>sendDscMsg&&sendDscMsg(msg),
-      random:(min,max)=>Math.floor(Math.random()*(max-min+1))+min,
-      pick:(arr)=>arr[Math.floor(Math.random()*arr.length)],
-      shuffle:(arr)=>[...arr].sort(()=>Math.random()-.5),
-      stockData,
-      now:()=>new Date(),
-      today:()=>new Date().toISOString().slice(0,10),
-    };
-    const fn=new Function(
+    const _AF=Object.getPrototypeOf(async function(){}).constructor;
+    const _fn=new _AF(
       'CP','DSTU','questData','toast','syncCoin','goPage','openMod','closeMod',
       'reward','deduct','give','getStudents','getStudent','announce','save','load',
       'input','confirm','alert','addQuest','random','pick','shuffle','stockData','now','today','api',
       code
     );
-    fn(api.CP,api.DSTU,api.questData,api.toast,api.syncCoin,api.goPage,api.openMod,api.closeMod,
-       api.reward,api.deduct,api.give,api.getStudents,api.getStudent,api.announce,
-       api.save,api.load,api.input,api.confirm,api.alert,api.addQuest,
-       api.random,api.pick,api.shuffle,api.stockData,api.now,api.today,api);
-  }catch(e){toast('실행 오류: '+e.message,'e');console.error(e);}
+    const _res=_fn(
+      _pluginAPI.CP,_pluginAPI.DSTU,_pluginAPI.questData,_pluginAPI.toast,_pluginAPI.syncCoin,
+      _pluginAPI.goPage,_pluginAPI.openMod,_pluginAPI.closeMod,
+      _pluginAPI.reward,_pluginAPI.deduct,_pluginAPI.give,_pluginAPI.getStudents,
+      _pluginAPI.getStudent,_pluginAPI.announce,_pluginAPI.save,_pluginAPI.load,
+      _pluginAPI.input,_pluginAPI.confirm,_pluginAPI.alert,_pluginAPI.addQuest,
+      _pluginAPI.random,_pluginAPI.pick,_pluginAPI.shuffle,
+      _pluginAPI.stockData,_pluginAPI.now,_pluginAPI.today,_pluginAPI
+    );
+    if(_res&&typeof _res.catch==='function'){
+      _res.catch(e=>{toast('플러그인 오류: '+e.message,'e');console.error('[Plugin RuntimeError]',e);});
+    }
+  }catch(e){toast('플러그인 실행 오류: '+e.message,'e');console.error('[Plugin Error]',e);}
 }
 
 function runPlugin(id){
@@ -8687,41 +8701,57 @@ function openPluginEditor(editId){
   document.getElementById('ped-out').style.color='#4ade80';
   openMod('md-plugin-edit');
 }
-// pedTest 재정의 - 새 출력창 사용
+// pedTest - 문법 검사 + AsyncFunction으로 async 플러그인 및 런타임 에러 모두 처리
 function pedTest(){
   const code=document.getElementById('ped-code')?.value||'';
   const out=document.getElementById('ped-out');
   if(!out)return;
   out.style.color='#4ade80';
   out.textContent='▶ 실행 중...';
+  // 1단계: 문법 사전 검사
+  try{ new Function(code); }catch(synErr){
+    out.style.color='#ef4444';
+    out.textContent='❌ 문법 오류: '+synErr.message;
+    return;
+  }
+  const origToast=window._toast_backup||(window._toast_backup=toast);
+  const logs=[];
+  const testToast=(m,t)=>{logs.push((t==='e'?'❌ ':t==='s'?'✅ ':'ℹ️ ')+m);origToast(m,t);};
+  const pluginAPI={CP,DSTU,toast:testToast,syncCoin,
+    reward:(a,r)=>{logs.push('💰 +'+a+' CC ('+(r||'보상')+')');},
+    deduct:(a,r)=>{logs.push('💸 -'+a+' CC ('+(r||'차감')+')');return(CP.balance||0)>=a;},
+    announce:(m)=>logs.push('📢 '+m),
+    save:(k,v)=>{
+      try{localStorage.setItem('plg_'+k,JSON.stringify(v));}catch(_){}
+      if(SB&&CP?.class_id&&CP?.id!=='demo'&&!CP?._isGuest){mergeClassSettings({['plg_'+k]:v}).catch(()=>{});}
+    },
+    load:(k,d)=>{try{return JSON.parse(localStorage.getItem('plg_'+k))||d;}catch(_){return d;}},
+    getStudents:()=>DSTU,random:(mn,mx)=>Math.floor(Math.random()*(mx-mn+1))+mn,
+    pick:(a)=>a[Math.floor(Math.random()*a.length)],shuffle:(a)=>[...a].sort(()=>Math.random()-.5),
+    stockData,now:()=>new Date(),today:()=>new Date().toISOString().slice(0,10),
+    input:(l)=>prompt(l)||'',alert:(m)=>{logs.push('⚡ '+m);},
+    goPage,openMod,closeMod,addQuest:(t,d,r)=>{DQUESTS.push({id:Date.now(),title:t,desc:d,reward:r,status:'active'});logs.push('📋 퀘스트 추가: '+t);}
+  };
+  // 2단계: AsyncFunction으로 실행 → async 런타임 에러도 catch
   try{
-    const origToast=window._toast_backup||(window._toast_backup=toast);
-    const logs=[];
-    const fn=new Function('CP','toast','syncCoin','DSTU','input','alert','api',
-      'reward','deduct','announce','save','load','getStudents','random','pick','shuffle','stockData','now','today',
+    const _AF=Object.getPrototypeOf(async function(){}).constructor;
+    const _fn=new _AF('CP','toast','syncCoin','DSTU','input','alert','api',
+      'reward','deduct','announce','save','load','getStudents','random','pick','shuffle',
+      'stockData','now','today','goPage','openMod','closeMod','addQuest',
       code);
-    const testToast=(m,t)=>{logs.push((t==='e'?'❌ ':t==='s'?'✅ ':'ℹ️ ')+m);origToast(m,t);};
-    const pluginAPI={CP,DSTU,toast:testToast,syncCoin,reward:(a,r)=>{logs.push('💰 +'+a+' CC ('+(r||'보상')+')');},
-      deduct:(a,r)=>{logs.push('💸 -'+a+' CC ('+(r||'차감')+')');return(CP.balance||0)>=a;},
-      announce:(m)=>logs.push('📢 '+m),
-      save:(k,v)=>{
-        try{localStorage.setItem('plg_'+k,JSON.stringify(v));}catch(_){}
-        if(SB&&CP?.class_id&&CP?.id!=='demo'&&!CP?._isGuest){mergeClassSettings({['plg_'+k]:v}).catch(()=>{});}
-      },
-      load:(k,d)=>{try{return JSON.parse(localStorage.getItem('plg_'+k))||d;}catch(_){return d;}},
-      getStudents:()=>DSTU,random:(mn,mx)=>Math.floor(Math.random()*(mx-mn+1))+mn,
-      pick:(a)=>a[Math.floor(Math.random()*a.length)],shuffle:(a)=>[...a].sort(()=>Math.random()-.5),
-      stockData,now:()=>new Date(),today:()=>new Date().toISOString().slice(0,10),
-      input:(l)=>prompt(l)||'',alert:(m)=>{logs.push('⚡ '+m);},
-    };
-    fn(pluginAPI.CP,pluginAPI.toast,syncCoin,DSTU,pluginAPI.input,pluginAPI.alert,pluginAPI,
+    const _res=_fn(pluginAPI.CP,pluginAPI.toast,syncCoin,DSTU,pluginAPI.input,pluginAPI.alert,pluginAPI,
        pluginAPI.reward,pluginAPI.deduct,pluginAPI.announce,pluginAPI.save,pluginAPI.load,
        pluginAPI.getStudents,pluginAPI.random,pluginAPI.pick,pluginAPI.shuffle,
-       pluginAPI.stockData,pluginAPI.now,pluginAPI.today);
-    out.textContent=logs.length?logs.join('\n'):'✅ 실행 완료 (출력 없음)';
+       pluginAPI.stockData,pluginAPI.now,pluginAPI.today,
+       pluginAPI.goPage,pluginAPI.openMod,pluginAPI.closeMod,pluginAPI.addQuest);
+    const finish=()=>{ out.textContent=logs.length?logs.join('\n'):'✅ 실행 완료 (출력 없음)'; };
+    if(_res&&typeof _res.catch==='function'){
+      _res.then(finish).catch(e=>{out.style.color='#ef4444';out.textContent='❌ 런타임 오류: '+e.message;console.error('[pedTest RuntimeError]',e);});
+    } else { finish(); }
   }catch(e){
     out.style.color='#ef4444';
     out.textContent='❌ 오류: '+e.message;
+    console.error('[pedTest Error]',e);
   }
 }
 

@@ -3167,43 +3167,38 @@ async function fetchRealStocks(){
       if(results.length>0){stockData=results;stockIsReal=true;return true;}
     }catch(_){}
   }
-  // https 환경 → 여러 CORS 프록시 순서대로 시도
-  const STOCK_PROXIES=[
-    (url)=>`https://corsproxy.io/?url=${encodeURIComponent(url)}`,
-    (url)=>`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
-    (url)=>`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
-  ];
-  async function fetchYahoo(tk){
-    const url=`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(tk)}?interval=1d&range=1d`;
-    for(const mkProxy of STOCK_PROXIES){
-      try{
-        const r=await fetch(mkProxy(url),{signal:AbortSignal.timeout(5000)});
-        if(!r.ok)continue;
-        let parsed;
-        const ct=r.headers.get('content-type')||'';
-        if(ct.includes('json')){
-          const j=await r.json();
-          // allorigins wraps in {contents:'...'}
-          parsed=j.contents?JSON.parse(j.contents):j;
-        } else {
-          parsed=JSON.parse(await r.text());
+  // Supabase stocks 테이블에서 최신 가격 가져오기 (외부 CORS 의존 없음)
+  if(SB&&CP?.id!=='demo'&&!CP?._isGuest){
+    try{
+      const{data:sRows}=await SB.from('stocks').select('ticker,name,price,change_pct');
+      if(sRows&&sRows.length){
+        const updated=[];
+        for(const s of REAL_STOCKS){
+          const row=sRows.find(r=>r.ticker===s.tk||r.ticker===s.tk.replace('.KS',''));
+          if(row){
+            updated.push({tk:s.tk,nm:s.nm,pr:parseFloat(row.price)||s.pr||1000,ch:parseFloat(row.change_pct)||0});
+          }
         }
-        const q=parsed?.chart?.result?.[0]?.meta;
-        if(q)return q;
-      }catch(_){continue;}
-    }
-    return null;
+        if(updated.length>0){
+          // 시뮬레이션으로 약간의 변동 적용 (실제 DB 값 기준)
+          stockData=updated.map(s=>{
+            const drift=(Math.random()-.48)*0.8;
+            return{...s,pr:Math.max(1,parseFloat((s.pr*(1+drift/100)).toFixed(2))),ch:parseFloat((s.ch+drift*0.3).toFixed(2))};
+          });
+          stockIsReal=true;
+          // 변동 결과를 DB에 저장 (선생님/관리자만)
+          if(CP?.role==='teacher'||CP?.role==='dev'||CP?.role==='superadmin'){
+            stockData.forEach(async s=>{
+              try{await SB.from('stocks').update({price:s.pr,change_pct:s.ch,updated_at:new Date().toISOString()}).eq('ticker',s.tk.replace('.KS',''));}catch(_){}
+            });
+          }
+          return true;
+        }
+      }
+    }catch(_){}
   }
-  try{
-    const results=[];
-    for(const s of REAL_STOCKS){
-      const q=await fetchYahoo(s.tk);
-      if(q){const pr=q.regularMarketPrice||q.previousClose;const prev=q.chartPreviousClose||q.previousClose||pr;const ch=prev?+((pr-prev)/prev*100).toFixed(2):0;results.push({tk:s.tk,nm:s.nm,pr,ch,currency:q.currency||'USD'});}
-    }
-    if(results.length>0){stockData=results;stockIsReal=true;return true;}
-  }catch(_){}
-  // 폴백: 시뮬레이션
-  stockData.forEach(s=>{const ch=(Math.random()-.45)*2;s.ch=parseFloat(ch.toFixed(2));s.pr=Math.max(1,parseFloat((s.pr*(1+ch/100)).toFixed(2)));});
+  // 폴백: 로컬 시뮬레이션 (DSTOCKS 기준 랜덤 변동)
+  stockData=stockData.map(s=>{const ch=(Math.random()-.45)*2;return{...s,ch:parseFloat(ch.toFixed(2)),pr:Math.max(1,parseFloat((s.pr*(1+ch/100)).toFixed(2)))};});
   return false;
 }
 function initStocks(){
@@ -3276,11 +3271,11 @@ async function renderTx(){
 }
 async function refreshStocks(){
   const btn=document.querySelector('#stocks-wrap [onclick="refreshStocks()"]');
-  if(btn){btn.disabled=true;btn.innerHTML='<svg width="12" height="12" viewBox="0 0 12 12" style="animation:spin .8s linear infinite"><path d="M1 6a5 5 0 119.5 2.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M10 1v3.5H6.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg> 새로고침';}
+  if(btn){btn.disabled=true;btn.innerHTML='<svg width="12" height="12" viewBox="0 0 12 12" fill="none" style="animation:spin .8s linear infinite;vertical-align:middle"><path d="M1 6a5 5 0 119.5 2.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M10 1v3.5H6.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg> 로딩중...';}
   const ok=await fetchRealStocks();
   renderStocks();
   toast(ok?'실시간 주가 업데이트 완료 📈':'시뮬레이션 데이터로 갱신','i');
-  if(btn){btn.disabled=false;btn.innerHTML='<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 6a5 5 0 119.5 2.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M10 1v3.5H6.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg> 새로고침';}
+  if(btn){btn.disabled=false;btn.innerHTML='<svg width="12" height="12" viewBox="0 0 12 12" fill="none" style="vertical-align:middle"><path d="M1 6a5 5 0 119.5 2.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M10 1v3.5H6.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg> 새로고침';}
 }
 function openStockMod(tk){ openStockModal(tk); }
 function stTotal(){
@@ -4409,11 +4404,120 @@ function admClearAllItems(stuIdx){
   document.getElementById('md-stu-items')?.remove();
 }
 async function addDSTU(){
+  // 실제 Supabase 계정이 있으면 이메일+비번 모달, 없으면 이름만 로컬 추가
+  if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest&&CP?.class_id){
+    openAddStudentModal();
+    return;
+  }
   const nm=prompt('새 학생 이름:');if(!nm?.trim())return;
   const newStu={id:'s'+(DSTU.length+1+Date.now()),nm:nm.trim(),bal:500,gr:'B',job:'학생',sus:false,inventory:[]};
   DSTU.push(newStu);
-  toast(`${nm} 추가됨`,'s');
+  toast(nm+' 추가됨','s');
   admTab('students',null);
+}
+
+function openAddStudentModal(){
+  const mid='md-add-student';
+  if(!document.getElementById(mid)){
+    document.body.insertAdjacentHTML('beforeend',`
+    <div class="ov" id="${mid}">
+      <div class="modal" style="width:min(420px,94vw)">
+        <div class="mhdr">
+          <div class="mtitle">🎓 학생 계정 등록</div>
+          <button class="mclose" onclick="closeMod('${mid}')"><svg viewBox="0 0 9 9" fill="none" width="9" height="9"><path d="M1 1l7 7M8 1L1 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
+        </div>
+        <div style="padding:20px;display:flex;flex-direction:column;gap:13px">
+          <div class="fg">
+            <label class="fl">학생 이름 *</label>
+            <input class="fi" id="as-name" placeholder="홍길동" autocomplete="off">
+          </div>
+          <div class="fg">
+            <label class="fl">이메일 *</label>
+            <input class="fi" id="as-email" type="email" placeholder="student@school.com" autocomplete="off">
+          </div>
+          <div class="fg">
+            <label class="fl">임시 비밀번호 *</label>
+            <div style="display:flex;gap:8px">
+              <input class="fi" id="as-pw" placeholder="6자 이상" style="flex:1" autocomplete="off">
+              <button class="btn btn-g btn-sm" onclick="document.getElementById('as-pw').value=Math.random().toString(36).slice(2,10)" style="flex-shrink:0;white-space:nowrap">자동생성</button>
+            </div>
+          </div>
+          <div id="as-err" class="fe"></div>
+          <div style="background:#eff6ff;border:1px solid #dbeafe;border-radius:10px;padding:10px 12px;font-size:12px;color:#1e40af;line-height:1.6">
+            📌 학생이 이 이메일/비밀번호로 로그인하면 자동으로 학급에 배정됩니다.<br>
+            비밀번호는 학생에게 따로 전달해 주세요.
+          </div>
+        </div>
+        <div class="mfoot">
+          <button class="btn btn-g" onclick="closeMod('${mid}')">취소</button>
+          <button class="btn btn-p" id="as-submit-btn" onclick="submitAddStudent()">등록</button>
+        </div>
+      </div>
+    </div>`);
+  }
+  // 초기화
+  ['as-name','as-email','as-pw'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  const err=document.getElementById('as-err');if(err){err.style.display='none';}
+  openMod(mid);
+}
+
+async function submitAddStudent(){
+  const nm=(document.getElementById('as-name')?.value||'').trim();
+  const email=(document.getElementById('as-email')?.value||'').trim();
+  const pw=(document.getElementById('as-pw')?.value||'').trim();
+  const errEl=document.getElementById('as-err');
+  const btn=document.getElementById('as-submit-btn');
+  const showErr=(msg)=>{if(errEl){errEl.textContent=msg;errEl.style.display='block';}};
+
+  if(!nm){showErr('이름을 입력하세요.');return;}
+  if(!email||!email.includes('@')){showErr('올바른 이메일을 입력하세요.');return;}
+  if(!pw||pw.length<6){showErr('비밀번호는 6자 이상이어야 합니다.');return;}
+
+  if(btn){btn.disabled=true;btn.textContent='등록 중...';}
+
+  try{
+    // 1. Supabase Auth 계정 생성 (signUp 사용 - Admin API 없이)
+    const{data:authData,error:signUpErr}=await SB.auth.signUp({
+      email,
+      password:pw,
+      options:{
+        data:{name:nm,role:'student'},
+        emailRedirectTo:location.origin
+      }
+    });
+    if(signUpErr)throw signUpErr;
+    const newUid=authData?.user?.id;
+    if(!newUid)throw new Error('계정 생성 실패 (uid 없음)');
+
+    // 2. profiles 직접 upsert (트리거가 못 만들 수도 있으므로 보장)
+    const acct=('0000'+Math.floor(Math.random()*10000)).slice(-4)+'-'+('0000'+Math.floor(Math.random()*10000)).slice(-4);
+    await SB.from('profiles').upsert({
+      id:newUid,
+      name:nm,
+      email,
+      role:'student',
+      class_id:CP.class_id,
+      class_name:CP.class_name||'',
+      balance:500,
+      job:'학생',
+      credit_score:700,
+      credit_grade:'B',
+      account_number:acct,
+      school:CP.school||''
+    },{onConflict:'id'});
+
+    // 3. 로컬 DSTU에도 추가
+    DSTU.push({id:newUid,nm,bal:500,gr:'B',job:'학생',sus:false,inventory:[]});
+
+    closeMod('md-add-student');
+    toast('✅ '+nm+' 등록 완료! (이메일: '+email+')','s');
+    admTab('students',null);
+  }catch(e){
+    showErr('등록 실패: '+(e.message||'서버 오류'));
+    console.error('[addStudent]',e);
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent='등록';}
+  }
 }
 function bulkRewardDSTU(){
   const amt=parseInt(prompt('전체 학생에게 지급할 코인 (음수=회수):')||0);

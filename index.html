@@ -312,11 +312,17 @@ select.fi{appearance:none;background-image:url("data:image/svg+xml,%3Csvg width=
 .cnt-full{flex:1;overflow:hidden;display:flex;flex-direction:column;min-width:0;height:100%;min-height:0;}
 .cnt-full #cnt{flex:1;padding:28px 32px;overflow-y:auto;max-width:1200px;margin:0 auto;width:100%;min-height:0;scrollbar-gutter:stable;}
 .cnt-full #cnt:has(.page-full.on),.cnt-full #cnt:has(#pg-quests.on){padding:0!important;max-width:none!important;overflow:hidden!important;display:flex!important;flex-direction:column!important;height:100%!important;}
-.page{display:none;overflow-y:auto;}
-.page.on{padding:28px 32px;}
-.page.on{display:block;}
-.page-full{display:none;flex-direction:column;}
-.page-full.on{display:flex;height:100%;}
+._hidden{display:none !important;}
+.page{display:none !important;overflow-y:auto;}
+.page.on{display:block !important;padding:28px 32px;}
+.page-full{display:none !important;flex-direction:column;}
+.page-full.on{display:flex !important;height:100%;}
+/* 퀘스트 페이지 특수 처리 */
+#pg-quests{display:none !important;}
+#pg-quests.on{display:flex !important;flex-direction:column !important;height:100% !important;padding:0 !important;}
+/* pg-board 는 page-full 이므로 flex */
+#pg-board{display:none !important;}
+#pg-board.on{display:flex !important;flex-direction:column !important;height:100% !important;}
 @keyframes pgIn{from{opacity:0}to{opacity:1}}
 
 /* ── PAGE HEADER ── */
@@ -670,9 +676,7 @@ hr.div{border:none;border-top:1px solid #f1f5f9;margin:16px 0;}
 @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.4;}}
 .stk-src-note{font-size:10.5px;color:var(--text4);font-style:italic;margin-top:6px;padding:0 13px 8px;}
 
-#pg-quests{padding:0!important;overflow:hidden!important;}
-#pg-quests{padding:0!important;overflow:hidden!important;}
-#pg-quests.on{display:flex!important;flex-direction:column!important;height:100%!important;}
+/* #pg-quests 규칙은 위 섹션에서 통합 처리 */
 </style>
 </head>
 <body>
@@ -943,7 +947,7 @@ hr.div{border:none;border-top:1px solid #f1f5f9;margin:16px 0;}
       </div>
 
       <!-- ══ QUESTS ════════════════════════════════ -->
-      <div class="page" id="pg-quests" style="padding:0!important;overflow:hidden!important;position:relative;">
+      <div class="page" id="pg-quests" style="position:relative;">
         <div style="display:grid;grid-template-columns:320px 1fr 280px;height:100%;overflow:hidden;background:#f8faff;">
           <!-- 좌측: 퀘스트 목록 -->
           <div style="border-right:1.5px solid #eef2f8;display:flex;flex-direction:column;overflow:hidden;background:#fff;height:100%;padding-bottom:16px;">
@@ -2168,16 +2172,23 @@ function initRealtimeSubscriptions(){
       .on('postgres_changes',{event:'INSERT',schema:'public',table:'quest_completions'},(payload)=>{
         const d=payload.new;
         if(d?.status!=='pending')return;
-        // 내 학급 퀘스트인지 확인
-        const q=questData.find(x=>String(x.id)===String(d.quest_id));
-        if(!q)return;
-        const stuName=DSTU.find(s=>s.id===d.user_id)?.nm||'학생';
-        toast(`📬 ${stuName}이(가) "${q.title}" 퀘스트를 제출했어요`,'i');
-        // questApprovals에 추가
-        if(!questApprovals.find(a=>a.qid===d.quest_id&&a.uid===d.user_id)){
-          questApprovals.push({qid:d.quest_id,uid:d.user_id,nm:stuName,title:q.title,reward:q.reward,ts:''});
+        // questData가 비어있으면 먼저 로드 후 재처리
+        const processSubmit=()=>{
+          // 이 학급 퀘스트인지 확인
+          const q=questData.find(x=>String(x.id)===String(d.quest_id));
+          if(!q)return; // 이 학급 퀘스트 아님 → 무시
+          const stuName=DSTU.find(s=>s.id===d.user_id)?.nm||'학생';
+          toast(`📬 ${stuName}이(가) "${q.title}" 퀘스트를 제출했어요`,'i');
+          if(!questApprovals.find(a=>String(a.qid)===String(d.quest_id)&&a.uid===d.user_id)){
+            questApprovals.push({qid:d.quest_id,uid:d.user_id,nm:stuName,title:q.title,reward:q.reward,ts:''});
+          }
+          if(document.getElementById('pg-quests')?.classList.contains('on'))renderQuestSidebar();
+        };
+        if(!questData.length&&CP.class_id){
+          loadQuests().then(processSubmit).catch(()=>{});
+        } else {
+          processSubmit();
         }
-        if(document.getElementById('pg-quests')?.classList.contains('on'))renderQuestSidebar();
       }).subscribe();
     _realtimeChannels.push(questSubmitCh);
   }
@@ -2362,6 +2373,8 @@ function showApp(){
         const neis=schedEvents.filter(e=>e.neis);
         schedEvents=[...s.schedEvents.filter(e=>!e.neis),...neis];
       }
+      // 설정 로드 즉시 시간 제한 체크
+      if(CP?.role==='student') checkTimeRestrict();
     }).then(()=>{},()=>{});
   }
   initRealtimeSubscriptions();
@@ -2542,23 +2555,23 @@ function goPage(id){
   const board=document.getElementById('pg-board');
   // board-area 비우기 (다른 페이지 이동 시 잔재 제거)
   if(!isBoard){const ba=document.getElementById('board-area');if(ba)ba.innerHTML='';}
-  // 모든 .page 숨기기 (겹침 방지)
-  document.querySelectorAll('.page').forEach(p=>{
+  // 모든 .page, .page-full 완전히 숨기기 (겹침 방지) - class와 style 모두 초기화
+  document.querySelectorAll('.page,.page-full').forEach(p=>{
     p.classList.remove('on');
     p.style.display='none';
   });
   if(isBoard){
-    if(cnt)cnt.style.display='none';
-    if(board){board.style.display='flex';}
+    if(cnt){cnt.classList.add('_hidden');cnt.style.display='none';}
+    if(board){board.style.display='';board.classList.add('on');}
   } else {
-    if(board)board.style.display='none';
+    if(board){board.classList.remove('on');board.style.display='none';}
     if(cnt){
-      cnt.style.display='block';
-      if(isFullPage){cnt.style.padding='0';cnt.style.maxWidth='100%';}
-      else{cnt.style.padding='';cnt.style.maxWidth='';}
+      cnt.classList.remove('_hidden');cnt.style.display='';
+      if(isFullPage){cnt.style.padding='0';cnt.style.maxWidth='100%';cnt.style.overflow='hidden';}
+      else{cnt.style.padding='';cnt.style.maxWidth='';cnt.style.overflow='';}
     }
     const pg=document.getElementById(id);
-    if(pg){pg.classList.add('on');pg.style.display='';}
+    if(pg){pg.style.display='';pg.classList.add('on');}
   }
   // nav/sidebar 활성
   document.querySelectorAll('.nl').forEach(b=>b.classList.toggle('on',b.getAttribute('onclick')?.includes(id)));
@@ -2590,7 +2603,7 @@ async function loadDash(){
   }else if(p.role==='teacher'){
     const stuCount=DSTU.length;
     const activeQ=(questData.length?questData:DQUESTS).filter(q=>q.status==='active'||!q.status).length;
-    const totalCoin=DSTU.reduce((s,x)=>s+x.bal,0)+(CP.balance||0);
+    const totalCoin=DSTU.reduce((s,x)=>s+x.bal,0);
     const riskCnt=DSTU.filter(s=>s.gr==='D').length;
     const pendingCnt=questApprovals?.length||0;
     document.getElementById('dash-stats').innerHTML=`
@@ -2619,11 +2632,11 @@ async function loadDash(){
   }
   // 비동기로 SB에서 실제 데이터 로드
   if(SB&&CU&&CP?.class_id&&CP?.id!=='demo'){
-    SB.from('profiles').select('id,name,balance,credit_grade,is_suspended').eq('class_id',CP.class_id).then(({data})=>{
+    SB.from('profiles').select('id,name,balance,credit_grade,is_suspended,role').eq('class_id',CP.class_id).then(({data})=>{
       if(!data)return;
-      const stus=data.filter(s=>s.id!==CU.id);
+      const stus=data.filter(s=>s.role==='student');
       const el=document.getElementById('s-cnt');
-      if(el)el.textContent=stus.length;
+      if(el)el.textContent=stus.length+' 명';
       const cc=document.getElementById('c-cnt');
       if(cc)cc.textContent=stus.reduce((a,s)=>a+(s.balance||0),0).toLocaleString();
       const rc=document.getElementById('r-cnt');
@@ -3135,22 +3148,39 @@ async function renderEconRankTab(el){
   const medals=['🥇','🥈','🥉'];
   const grColor={S:'#b45309',A:'#10b981',B:'#3b82f6',C:'#8b5cf6',D:'#ef4444'};
   const max=all[0]?.bal||1;
+  const totalCC=all.reduce((s,x)=>s+x.bal,0);
   el.innerHTML=`
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px">
+    ${meIsStudent?`
     <div class="stat" style="background:linear-gradient(135deg,#fef9ec,#fef3c7);border-color:#fcd34d;text-align:center">
       <div style="font-size:32px;margin-bottom:6px">🏅</div>
-      <div style="font-size:26px;font-weight:900;color:#92400e">${myRank}위</div>
+      <div style="font-size:26px;font-weight:900;color:#92400e">${myRank||'-'}위</div>
       <div style="font-size:12px;color:#b45309;margin-top:2px">내 순위 / 전체 ${all.length}명</div>
     </div>
     <div class="stat" style="text-align:center">
       <div class="cc-coin-ico cc-coin-ico-lg" style="margin:0 auto 8px">C</div>
       <div style="font-size:24px;font-weight:900;color:#b45309">${(CP.balance||0).toLocaleString()}</div>
-      <div style="font-size:12px;color:#94a3b8;margin-top:2px">보유 CC</div>
+      <div style="font-size:12px;color:#94a3b8;margin-top:2px">내 보유 CC</div>
     </div>
     <div class="stat" style="text-align:center">
       <div style="font-size:32px;font-weight:900;color:${grColor[CP.credit_grade||'C']};margin-bottom:4px">${CP.credit_grade||'C'}</div>
-      <div style="font-size:12px;color:#94a3b8">신용 등급</div>
+      <div style="font-size:12px;color:#94a3b8">내 신용 등급</div>
+    </div>`:`
+    <div class="stat" style="text-align:center">
+      <div style="font-size:28px;margin-bottom:6px">👥</div>
+      <div style="font-size:26px;font-weight:900;color:#1d4ed8">${all.length}명</div>
+      <div style="font-size:12px;color:#64748b;margin-top:2px">학급 학생 수</div>
     </div>
+    <div class="stat" style="text-align:center">
+      <div class="cc-coin-ico cc-coin-ico-lg" style="margin:0 auto 8px">C</div>
+      <div style="font-size:24px;font-weight:900;color:#b45309">${totalCC.toLocaleString()}</div>
+      <div style="font-size:12px;color:#94a3b8;margin-top:2px">학급 총 자산</div>
+    </div>
+    <div class="stat" style="text-align:center">
+      <div style="font-size:28px;margin-bottom:6px">📊</div>
+      <div style="font-size:24px;font-weight:900;color:#15803d">${all.length?Math.round(totalCC/all.length).toLocaleString():0}</div>
+      <div style="font-size:12px;color:#94a3b8;margin-top:2px">1인 평균 CC</div>
+    </div>`}
   </div>
 
   <!-- 상위 3명 포디움 -->
@@ -3578,7 +3608,7 @@ async function loadShop(){
   if(SB&&CP.class_id){
     let _r0={data:null};try{_r0=await SB.from('shop_items').select('*').eq('class_id',CP.class_id).eq('is_active',true).order('created_at');}catch(_){}
     const{data}=_r0;
-    if(data&&data.length) shopItems=data.map(i=>({id:i.id,nm:i.name,desc:i.description||'',cat:i.category||'기타',pr:i.price||100,st:i.stock??-1,emoji:i.emoji||'📦'}));
+    if(data&&data.length) shopItems=data.map(i=>({id:i.id,nm:i.name,desc:i.description||'',cat:i.category||'기타',pr:i.price||100,st:i.stock??-1,ico:i.emoji||'📦',emoji:i.emoji||'📦'}));
     else shopItems=[...DSHOP];
   } else { shopItems=[...DSHOP]; }
   shopTab('items',document.querySelector('#shop-tabs .admtab'));syncCoin();
@@ -3977,13 +4007,9 @@ async function admTab(tab,btn){
   const el=document.getElementById('adm-body');
   switch(tab){
     case'students':{
-      // DB에서 학생 목록 로드
-      if(!_dstuLoaded){
-        el.innerHTML='<div class="empty"><div style="width:36px;height:36px;border:3px solid var(--blue5);border-top-color:var(--blue);border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 12px"></div><div class="empty-t">학생 목록 불러오는 중...</div></div>';
-        await loadDSTU();
-      } else {
-        loadDSTU(true); // 백그라운드 갱신
-      }
+      // DB에서 학생 목록 로드 (아이템 포함 항상 최신 데이터)
+      el.innerHTML='<div class="empty"><div style="width:36px;height:36px;border:3px solid var(--blue5);border-top-color:var(--blue);border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 12px"></div><div class="empty-t">학생 목록 불러오는 중...</div></div>';
+      await loadDSTU(true);
       const sViewMode=window._stuViewMode||'card';
       const allStus=[...DSTU];
       el.innerHTML=`<div>
@@ -4062,14 +4088,19 @@ async function admTab(tab,btn){
         }
         </div>
       </div>`;break;}
-    case'quests':{ const qList=questData.length?questData:DQUESTS;
-      el.innerHTML=`
+    case'quests':{ 
+      // 선생님 퀘스트 탭 진입 시 항상 DB에서 최신 승인대기 목록 새로고침
+      el.innerHTML='<div class="empty"><div style="width:36px;height:36px;border:3px solid var(--blue5);border-top-color:var(--blue);border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 12px"></div><div class="empty-t">퀘스트 불러오는 중...</div></div>';
+      loadQuests().then(()=>{
+        const qList=questData.length?questData:DQUESTS;
+        el.innerHTML=`
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
           <div style="font-size:16px;font-weight:800">퀘스트 관리</div>
           <button class="btn btn-p btn-sm" onclick="openMod('md-addq')">+ 퀘스트 추가</button>
         </div>
+        ${questApprovals.length?`<div style="padding:12px 14px;background:#fffbeb;border:1.5px solid #fde68a;border-radius:12px;margin-bottom:14px;font-size:13px;font-weight:700;color:#92400e">⏳ 승인 대기 ${questApprovals.length}건 — 퀘스트를 클릭해서 처리하세요</div>`:''}
         ${qList.map(q=>`
-        <div class="card" style="display:flex;align-items:center;gap:14px;margin-bottom:10px;cursor:pointer" onclick="admOpenQuestModal(${q.id})">
+        <div class="card" style="display:flex;align-items:center;gap:14px;margin-bottom:10px;cursor:pointer" onclick="admOpenQuestModal('${q.id}')">
           <div style="width:42px;height:42px;border-radius:12px;background:#eff6ff;display:flex;align-items:center;justify-content:center;flex-shrink:0">
             <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="9" cy="9" r="7.5" stroke="#1d4ed8" stroke-width="1.5"/><path d="M6 9l2.5 2.5 4-5" stroke="#1d4ed8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </div>
@@ -4081,12 +4112,15 @@ async function admTab(tab,btn){
             <div style="display:flex;align-items:center;gap:4px;font-weight:800;color:#b45309;font-size:14px">
               <div class="cc-coin-ico cc-coin-ico-sm">C</div>+${q.reward}
             </div>
+            ${questApprovals.filter(a=>String(a.qid)===String(q.id)).length>0?`<span class="chip chip-a">대기 ${questApprovals.filter(a=>String(a.qid)===String(q.id)).length}</span>`:''}
             <span class="chip ${q.status==='done'?'chip-g':q.status==='pending'?'chip-a':'chip-b'}">${q.status==='done'?'완료':q.status==='pending'?'대기':'진행'}</span>
             <button class="btn btn-r btn-xs" onclick="event.stopPropagation();delQ(${q.id})">
               <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M1.5 2.5h7M4 2.5V1.5h2v1M7.5 2.5l-.5 6H3l-.5-6" stroke="#fff" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </button>
           </div>
-        </div>`).join('')}`;break;}
+        </div>`).join('')}`;
+      }).catch(()=>{});
+      break;}
     case'shop':{ const sItems=shopItems.length?shopItems:DSHOP; loadShop();
       el.innerHTML=`
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
@@ -4114,7 +4148,13 @@ async function admTab(tab,btn){
             <button class="btn btn-r btn-xs" style="width:100%;margin-top:6px" onclick="delItem(${i.id})">삭제</button>
           </div>`}).join('')}
         </div>`;break;}
-    case'credit':el.innerHTML=`<div class="tw"><div class="tw-hdr"><div class="tw-title">신용 등급 관리</div></div><table><thead><tr><th>학생</th><th>등급</th><th>점수</th><th>수정</th></tr></thead><tbody>${DSTU.map(s=>`<tr><td>${s.nm}</td><td><span class="chip ${s.gr==='S'?'chip-a':s.gr==='A'?'chip-g':s.gr==='B'?'chip-b':s.gr==='C'?'chip-p':'chip-r'}">${s.gr}</span></td><td>${{S:900,A:800,B:700,C:600,D:500}[s.gr]}</td><td><button class="btn btn-g btn-xs" onclick="editGrade('${s.id}','${s.nm}','${s.gr}')">수정</button></td></tr>`).join('')}</tbody></table></div>`;break;
+    case'credit':{
+      if(!_dstuLoaded){
+        el.innerHTML='<div class="empty"><div style="width:36px;height:36px;border:3px solid var(--blue5);border-top-color:var(--blue);border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 12px"></div><div class="empty-t">학생 목록 불러오는 중...</div></div>';
+        await loadDSTU();
+      }
+      el.innerHTML=`<div class="tw"><div class="tw-hdr"><div class="tw-title">신용 등급 관리</div></div><table><thead><tr><th>학생</th><th>등급</th><th>점수</th><th>수정</th></tr></thead><tbody>${DSTU.map(s=>`<tr><td>${escHtml(s.nm||'')}</td><td><span class="chip ${s.gr==='S'?'chip-a':s.gr==='A'?'chip-g':s.gr==='B'?'chip-b':s.gr==='C'?'chip-p':'chip-r'}">${escHtml(s.gr||'B')}</span></td><td>${({S:900,A:800,B:700,C:600,D:500})[s.gr]||700}</td><td><button class="btn btn-g btn-xs" data-gid="${escHtml(s.id)}" data-gnm="${escHtml(s.nm||'')}" data-ggr="${s.gr||'B'}" onclick="editGrade(this.dataset.gid,this.dataset.gnm,this.dataset.ggr)">수정</button></td></tr>`).join('')}</tbody></table></div>`;
+      break;}
     case'time':{
       // DB에서 현재 설정 불러오기
       const _tr=window._classSettings?.timeRestrict||{};
@@ -4799,10 +4839,15 @@ function saveTime(){
   const start=document.getElementById('ts')?.value||'09:00';
   const end=document.getElementById('te')?.value||'17:00';
   const active=document.getElementById('ta')?.checked||false;
+  // 로컬 캐시 즉시 갱신
+  if(!window._classSettings) window._classSettings={};
+  window._classSettings.timeRestrict={start,end,active};
   if(SB&&CP?.class_id&&CP?.id!=='demo'&&!CP?._isGuest){
     mergeClassSettings({timeRestrict:{start,end,active}});
   }
   toast('시간 제한 저장됨 ('+start+' ~ '+end+')','s');
+  // 탭 UI 즉시 갱신
+  admTab('time',document.querySelector('#adm-tabs .admtab.on'));
 }
 function saveMsg(){
   const msg=document.getElementById('cmsg')?.value?.trim();
@@ -4951,44 +4996,76 @@ async function loadRanking(){
   const isTeacher=CP.role==='teacher'||CP.role==='dev'||CP.role==='superadmin';
   const el=document.getElementById('rank-body');
   if(el)el.innerHTML='<div style="text-align:center;padding:32px;color:#94a3b8">순위 불러오는 중...</div>';
-  // Supabase에서 학급의 학생만 직접 로드 (선생님 제외)
+  // Supabase에서 학급의 학생만 직접 로드 (선생님 제외) - 항상 최신 DB 값 사용
   let stuList=[];
   if(SB&&CU&&CP?.class_id&&CP?.id!=='demo'&&!CP?._isGuest){
     try{
-      const{data}=await SB.from('profiles')
-        .select('id,name,balance,credit_grade,job,is_suspended')
+      const{data,error}=await SB.from('profiles')
+        .select('id,name,balance,credit_grade,job,is_suspended,role')
         .eq('class_id',CP.class_id)
         .eq('role','student')
         .neq('is_suspended',true);
-      if(data&&data.length){
+      if(!error&&data&&data.length){
         stuList=data.map(s=>({
           nm:s.name||'학생',bal:s.balance||0,gr:s.credit_grade||'C',job:s.job||'학생',
           isMe:s.id===CU?.id
         }));
       }
-    }catch(_){}
+    }catch(e){console.error('[loadRanking]',e);}
   }
-  // Supabase 로드 실패 시 로컬 캐시 사용 (학생만)
-  if(!stuList.length){
+  // Supabase 로드 실패 → DSTU 캐시 사용 (학생만, 선생님 제외)
+  if(!stuList.length&&DSTU.length){
     const meEntry=isTeacher?[]:[{nm:CP.name||'나',bal:CP.balance||0,gr:CP.credit_grade||'C',job:CP.job||'학생',isMe:true}];
     stuList=[
       ...meEntry,
-      ...DSTU.filter(s=>!s.sus&&(!s.role||s.role==='student')).map(s=>({nm:s.nm,bal:s.bal,gr:s.gr,job:s.job||'학생',isMe:false}))
+      ...DSTU.filter(s=>!s.sus&&(!s.role||s.role==='student')).map(s=>({nm:s.nm,bal:s.bal,gr:s.gr,job:s.job||'학생',isMe:s.id===CU?.id}))
     ];
+  }
+  // DSTU도 비어있으면 강제 로드 후 재시도
+  if(!stuList.length&&CP?.class_id&&CP?.id!=='demo'&&!CP?._isGuest){
+    await loadDSTU(true);
+    if(DSTU.length){
+      const meEntry=isTeacher?[]:[{nm:CP.name||'나',bal:CP.balance||0,gr:CP.credit_grade||'C',job:CP.job||'학생',isMe:true}];
+      stuList=[
+        ...meEntry,
+        ...DSTU.filter(s=>!s.sus&&(!s.role||s.role==='student')).map(s=>({nm:s.nm,bal:s.bal,gr:s.gr,job:s.job||'학생',isMe:s.id===CU?.id}))
+      ];
+    }
   }
   // 본인 항목이 없으면 추가 (학생인 경우만)
   if(!isTeacher&&!stuList.find(s=>s.isMe)){
     stuList.push({nm:CP.name||'나',bal:CP.balance||0,gr:CP.credit_grade||'C',job:CP.job||'학생',isMe:true});
   }
+  if(!stuList.length){
+    if(el)el.innerHTML='<div style="text-align:center;padding:32px;color:#94a3b8">학급에 학생이 없거나 학급을 선택해주세요.</div>';
+    return;
+  }
   const all=stuList.sort((a,b)=>b.bal-a.bal);
   const myRank=all.findIndex(s=>s.isMe)+1;
   const medals=['🥇','🥈','🥉'];
   const grColor={S:'#b45309',A:'#15803d',B:'#1d4ed8',C:'#6d28d9',D:'#dc2626'};
+  const totalCC=all.reduce((s,x)=>s+x.bal,0);
   document.getElementById('rank-body').innerHTML=`
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:24px">
+  ${isTeacher?`
+    <div class="stat" style="text-align:center">
+      <div style="font-size:28px;margin-bottom:4px">👥</div>
+      <div style="font-size:22px;font-weight:900;color:#1d4ed8">${all.length}<span style="font-size:14px;color:#94a3b8;font-weight:500"> 명</span></div>
+      <div style="font-size:12px;color:var(--text4);margin-top:2px">학급 학생 수</div>
+    </div>
+    <div class="stat" style="text-align:center">
+      <div class="cc-coin-ico cc-coin-ico-lg" style="margin:0 auto 6px">C</div>
+      <div style="font-size:22px;font-weight:900;color:#92400e">${totalCC.toLocaleString()}</div>
+      <div style="font-size:12px;color:var(--text4);margin-top:2px">학급 총 자산</div>
+    </div>
+    <div class="stat" style="text-align:center">
+      <div style="font-size:28px;margin-bottom:4px">📊</div>
+      <div style="font-size:22px;font-weight:900;color:#15803d">${all.length?Math.round(totalCC/all.length).toLocaleString():0}</div>
+      <div style="font-size:12px;color:var(--text4);margin-top:2px">1인 평균 CC</div>
+    </div>`:`
     <div class="stat" style="text-align:center;background:linear-gradient(135deg,#fef9ec,#fef3c7);border-color:#fcd34d">
       <div style="font-size:28px;margin-bottom:4px">🏅</div>
-      <div style="font-size:22px;font-weight:900;color:#92400e">${myRank}위</div>
+      <div style="font-size:22px;font-weight:900;color:#92400e">${myRank||'-'}위</div>
       <div style="font-size:12px;color:#b45309;margin-top:2px">내 순위</div>
     </div>
     <div class="stat" style="text-align:center">
@@ -5000,7 +5077,7 @@ async function loadRanking(){
       <div style="font-size:28px;margin-bottom:4px">⭐</div>
       <div style="font-size:22px;font-weight:900;color:${grColor[CP.credit_grade||'C']}">${CP.credit_grade||'C'}</div>
       <div style="font-size:12px;color:var(--text4);margin-top:2px">신용 등급</div>
-    </div>
+    </div>`}
   </div>
   <div class="tw">
     <div class="tw-hdr"><div class="tw-title">💰 자산 순위표</div></div>
@@ -5617,7 +5694,7 @@ const JOB_ABILITIES={
 let questApprovals=[];
 let AUDIT_ROLES=['학급 반장','반장']; // 감사원 역할
 function submitQ(id){
-  const q=questData.find(q=>q.id===id);if(!q)return;
+  const q=questData.find(q=>String(q.id)===String(id));if(!q)return;
   if(q.status==='pending'){toast('이미 승인 대기 중이에요','i');return;}
   if(q.status==='done'){toast('이미 완료된 퀘스트예요','i');return;}
   // 승인 불필요 퀘스트: 즉시 보상 지급
@@ -5633,23 +5710,25 @@ function submitQ(id){
     }
     return;
   }
-  questApprovals.push({qid:id,uid:CP.id||CU?.id||'guest',nm:CP.name,title:q.title,reward:q.reward,ts:new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'})});
+  // 승인 필요 퀘스트
   q.status='pending';
   renderQuests();
   toast('✅ 완료 제출! 선생님 승인 대기 중…','i');
   // Supabase 저장
   if(SB&&CU){
-    sbSave(SB.from('quest_completions').upsert({
+    SB.from('quest_completions').upsert({
       quest_id:String(id), user_id:CU.id, status:'pending'
-    },{onConflict:'quest_id,user_id'}),'퀘스트 완료 저장');
+    },{onConflict:'quest_id,user_id'}).then(({error})=>{
+      if(error){toast('제출 저장 실패: '+error.message,'e');q.status='active';renderQuests();}
+    }).catch(e=>{toast('제출 오류: '+e.message,'e');q.status='active';renderQuests();});
   }
 }
 function approveQuest(qid,uid,reward){
-  const q=questData.find(q=>q.id===qid);
-  const a=questApprovals.find(a=>a.qid===qid&&a.uid===uid);
+  const q=questData.find(q=>String(q.id)===String(qid));
+  const a=questApprovals.find(a=>String(a.qid)===String(qid)&&a.uid===uid);
   if(q){q.status='done';q.prog=q.total;}
-  if(uid===CP.id||uid==='guest'){CP.balance+=reward;syncCoin();}
-  questApprovals=questApprovals.filter(a=>!(a.qid===qid&&a.uid===uid));
+  if(uid===CP.id||uid==='guest'){CP.balance+=Number(reward);syncCoin();}
+  questApprovals=questApprovals.filter(a=>!(String(a.qid)===String(qid)&&a.uid===uid));
   toast(`✅ ${a?.nm||'학생'} 퀘스트 승인! +${reward.toLocaleString()} CC 지급`,'s');
   // SB: 퀘스트 완료 상태 & 보상 지급 저장
   if(SB&&CU){
@@ -5665,10 +5744,10 @@ function approveQuest(qid,uid,reward){
   if(document.getElementById('pg-quests')?.classList.contains('on'))renderQuests();
 }
 function rejectQuest(qid,uid){
-  const q=questData.find(q=>q.id===qid);
-  const a=questApprovals.find(a=>a.qid===qid&&a.uid===uid);
+  const q=questData.find(q=>String(q.id)===String(qid));
+  const a=questApprovals.find(a=>String(a.qid)===String(qid)&&a.uid===uid);
   if(q)q.status='active';
-  questApprovals=questApprovals.filter(a=>!(a.qid===qid&&a.uid===uid));
+  questApprovals=questApprovals.filter(a=>!(String(a.qid)===String(qid)&&a.uid===uid));
   toast(`${a?.nm||'학생'} 퀘스트 반려됨`,'e');
   if(SB&&CU&&uid&&uid!=='guest'&&CP?.id!=='demo'){
     sbSave(SB.from('quest_completions').upsert(
@@ -7016,7 +7095,14 @@ const iv=setInterval(()=>{r--;if(r<=0){clearInterval(iv);toast('⏱ 타이머 �
 let userPlugins=[];let installedSet=new Set();
 try{
   const _up=localStorage.getItem('cw_user_plugins');
-  if(_up&&_up.trim()){userPlugins=JSON.parse(_up)||[];}
+  if(_up&&_up.trim()){
+    const _parsed=JSON.parse(_up)||[];
+    userPlugins=_parsed.filter(p=>{
+      if(!p||typeof p!=='object')return false;
+      if(!p.code||typeof p.code!=='string'||!p.code.trim())return false;
+      try{new Function(p.code);return true;}catch(_){return false;}
+    });
+  }
 }catch(_){userPlugins=[];}
 try{
   const _inst=localStorage.getItem('cw_installed');
@@ -7026,20 +7112,22 @@ try{
 async function loadPluginsFromSB(){
   if(!SB||!CU||CP?.id==='demo'||CP?._isGuest)return;
   try{
-    // user_plugins/installed_plugins 컬럼이 DB에 없을 수 있으므로 * 로 조회 후 체크
     const{data}=await SB.from('profiles').select('user_plugins,installed_plugins').eq('id',CU.id).maybeSingle();
-    if(!data)return; // 컬럼 없거나 row 없으면 패스
-    if(data){
-      if(data.user_plugins&&Array.isArray(data.user_plugins)&&data.user_plugins.length){
-        userPlugins=data.user_plugins;
-        try{localStorage.setItem('cw_user_plugins',JSON.stringify(userPlugins));}catch(_){}
-      }
-      if(data.installed_plugins&&Array.isArray(data.installed_plugins)&&data.installed_plugins.length){
-        installedSet=new Set(data.installed_plugins);
-        try{localStorage.setItem('cw_installed',JSON.stringify([...installedSet]));}catch(_){}
-      }
+    if(!data)return;
+    const validPlugin=(p)=>{
+      if(!p||typeof p!=='object')return false;
+      if(!p.code||typeof p.code!=='string'||!p.code.trim())return false;
+      try{new Function(p.code);return true;}catch(_){return false;}
+    };
+    if(data.user_plugins&&Array.isArray(data.user_plugins)&&data.user_plugins.length){
+      userPlugins=data.user_plugins.filter(validPlugin);
+      try{localStorage.setItem('cw_user_plugins',JSON.stringify(userPlugins));}catch(_){}
     }
-  }catch(_){}
+    if(data.installed_plugins&&Array.isArray(data.installed_plugins)&&data.installed_plugins.length){
+      installedSet=new Set(data.installed_plugins);
+      try{localStorage.setItem('cw_installed',JSON.stringify([...installedSet]));}catch(_){}
+    }
+  }catch(e){console.error('[loadPluginsFromSB]',e);}
 }
 let pedEditId=null; // 편집 중인 플러그인 id
 
@@ -7265,7 +7353,11 @@ function getAllPlugins(){return [...PLUGIN_DEFS,...userPlugins];}
 /* -- 스토어 렌더링 -- */
 function filterPlugins(v){
   const q=(v||'').toLowerCase();
-  renderStore(getAllPlugins().filter(p=>p.nm.toLowerCase().includes(q)||p.desc.toLowerCase().includes(q)||p.tag.toLowerCase().includes(q)));
+  renderStore(getAllPlugins().filter(p=>
+    (p.nm||'').toLowerCase().includes(q)||
+    (p.desc||'').toLowerCase().includes(q)||
+    (p.tag||'').toLowerCase().includes(q)
+  ));
 }
 
 function renderStore(list){
@@ -7412,6 +7504,8 @@ function pedSave(){
   const code=document.getElementById('ped-code').value.trim();
   if(!nm){toast('이름을 입력하세요','e');return;}
   if(!code){toast('코드를 입력하세요','e');return;}
+  // 저장 전 문법 검사
+  try{new Function(code);}catch(synErr){toast('코드 문법 오류: '+synErr.message,'e');return;}
   if(pedEditId){
     const idx=userPlugins.findIndex(p=>p.id===pedEditId);
     if(idx>=0){userPlugins[idx]={...userPlugins[idx],nm,desc,tag,code};}
@@ -7420,7 +7514,6 @@ function pedSave(){
     const newP={id:'u_'+Date.now(),nm,desc:desc||'사용자 플러그인',tag,code,
       by:CP.name||'사용자',stars:0,dl:0,_user:true};
     userPlugins.push(newP);
-    // PLUGIN_DEFS에는 추가하지 않음 - getAllPlugins()가 자동으로 userPlugins를 포함
     toast(`${nm} 스토어 등록 완료!`,'s');
   }
   savePluginStorage();
@@ -7515,22 +7608,28 @@ function runPlugin(id){
 function toggleInstall(id){
   const all=getAllPlugins();
   const p=all.find(p=>p.id===id);if(!p)return;
-  // 코드 문법 사전 검사
-  if(p.code){
-    try{ new Function(p.code); }catch(synErr){
-      toast('플러그인 문법 오류로 설치할 수 없어요: '+synErr.message,'e');
-      console.error('[Plugin Install SyntaxError]',synErr);
-      return;
-    }
-  }
   if(installedSet.has(id)){
     installedSet.delete(id);
     toast(`${p.nm} 제거됨`,'i');
-  } else {
-    installedSet.add(id);p.dl=(p.dl||0)+1;
     savePluginStorage();
-    toast(`✅ ${p.nm} 설치! 학급판 위젯 편집기에서 추가 가능`,'s');
+    const srch=document.getElementById('plg-srch');
+    filterPlugins(srch?.value||'');
+    return;
   }
+  // 코드 없는 플러그인 (메타데이터만 있는 공유 플러그인) 차단
+  if(!p.code||typeof p.code!=='string'||!p.code.trim()){
+    toast('이 플러그인은 코드가 없어 설치할 수 없어요','e');
+    return;
+  }
+  // 코드 문법 사전 검사
+  try{ new Function(p.code); }catch(synErr){
+    toast('플러그인 문법 오류로 설치할 수 없어요: '+synErr.message,'e');
+    console.error('[Plugin Install SyntaxError]',synErr);
+    return;
+  }
+  installedSet.add(id);p.dl=(p.dl||0)+1;
+  savePluginStorage();
+  toast(`✅ ${p.nm} 설치! 학급판 위젯 편집기에서 추가 가능`,'s');
   savePluginStorage();
   const srch=document.getElementById('plg-srch');
   filterPlugins(srch?.value||'');
@@ -8150,6 +8249,7 @@ async function loadQuests(){
   // 선생님 추가 버튼 표시
   const addBtn=document.getElementById('quest-add-btn-wrap');
   if(addBtn)(addBtn.style.display=(CP.role==='teacher'||CP.role==='dev'||CP.role==='superadmin')?'block':'none');
+  if((CP.role==="teacher"||CP.role==="dev"||CP.role==="superadmin")&&!_dstuLoaded)await loadDSTU();
   if(SB&&CP.class_id){
     let _r3={data:null};try{_r3=await SB.from('quests').select('*').eq('class_id',CP.class_id).eq('is_active',true).order('created_at');}catch(_){}
     const{data}=_r3;
@@ -8173,30 +8273,33 @@ async function loadQuests(){
     }
     // 선생님: 대기 중인 제출 로드
     if(CP.role==='teacher'||CP.role==='dev'||CP.role==='superadmin'){
-      let _pend={data:[]};
+      questApprovals=[];
       try{
-        // UUID 형식만 필터 (숫자 ID는 PostgREST가 UUID 파싱 실패 → 400)
         const UUID_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
         const qids=questData.map(q=>String(q.id)).filter(id=>UUID_RE.test(id));
         if(qids.length>0){
-          _pend=await SB.from('quest_completions')
-            .select('quest_id,user_id,status,profiles(name)')
+          // profiles join 대신 별도 쿼리로 이름 조회 (join RLS 실패 방지)
+          const {data:pending,error:pendErr}=await SB.from('quest_completions')
+            .select('quest_id,user_id,status')
             .eq('status','pending')
             .in('quest_id',qids);
-        } else {
-          // UUID 없는 경우: 학급 퀘스트 전체 대기 건 조회
-          _pend=await SB.from('quest_completions')
-            .select('quest_id,user_id,status,profiles(name)')
-            .eq('status','pending');
+          if(pendErr) console.error('[quest approvals]',pendErr.message);
+          if(pending&&pending.length){
+            // 학생 이름 일괄 조회
+            const uids=[...new Set(pending.map(p=>p.user_id))];
+            let nameMap={};
+            try{
+              const{data:profiles}=await SB.from('profiles').select('id,name').in('id',uids);
+              (profiles||[]).forEach(p=>{nameMap[p.id]=p.name||'학생';});
+            }catch(_){}
+            pending.forEach(p=>{
+              const q=questData.find(x=>String(x.id)===String(p.quest_id));
+              if(!q)return;
+              questApprovals.push({qid:p.quest_id,uid:p.user_id,nm:nameMap[p.user_id]||DSTU.find(s=>s.id===p.user_id)?.nm||'학생',title:q.title||'',reward:q.reward||0,ts:''});
+            });
+          }
         }
-      }catch(_){}
-      const{data:pending}=_pend;
-      questApprovals=[];
-      (pending||[]).forEach(p=>{
-        const q=questData.find(x=>String(x.id)===String(p.quest_id));
-        if(!q)return; // 이 학급 퀘스트가 아니면 무시
-        questApprovals.push({qid:p.quest_id,uid:p.user_id,nm:p.profiles?.name||'학생',title:q?.title||'',reward:q?.reward||0,ts:''});
-      });
+      }catch(e){console.error('[quest approvals load]',e);}
     }
   } else {
     questData=[...DQUESTS];
@@ -8227,10 +8330,10 @@ function renderQuestSidebar(){
     </div>`:''}
     <div style="font-size:11px;color:#94a3b8;font-weight:700;text-transform:uppercase;letter-spacing:.8px;padding:0 4px;margin-bottom:6px">진행중 ${list.filter(q=>q.status==='active').length}개</div>
     ${list.map(q=>{
-      const sel=selQuestId===q.id;
+      const sel=String(selQuestId)===String(q.id);
       const stColor={active:'#1d4ed8',done:'#15803d',pending:'#f59e0b'}[q.status]||'#94a3b8';
       const stLabel={active:'진행중',done:'완료',pending:'대기'}[q.status]||q.status;
-      return `<div onclick="selectQuest(${q.id})" style="padding:12px;border-radius:12px;cursor:pointer;margin-bottom:4px;background:${sel?'#eff6ff':'transparent'};border:1.5px solid ${sel?'#3b82f6':'transparent'};transition:.15s" onmouseover="if(${!sel})this.style.background='#f8faff'" onmouseout="if(${!sel})this.style.background='transparent'">
+      return `<div onclick="selectQuest('${q.id}')" style="padding:12px;border-radius:12px;cursor:pointer;margin-bottom:4px;background:${sel?'#eff6ff':'transparent'};border:1.5px solid ${sel?'#3b82f6':'transparent'};transition:.15s" onmouseover="if(${!sel})this.style.background='#f8faff'" onmouseout="if(${!sel})this.style.background='transparent'">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
           <span style="width:7px;height:7px;border-radius:50%;background:${stColor};flex-shrink:0"></span>
           <span style="font-size:13.5px;font-weight:700;color:#0f172a;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(q.title)}</span>
@@ -8249,9 +8352,9 @@ function renderQuestSidebar(){
 }
 
 function selectQuest(id){
-  selQuestId=id;
+  selQuestId=String(id);
   renderQuestSidebar();
-  const q=questData.find(q=>q.id===id);
+  const q=questData.find(q=>String(q.id)===String(id));
   if(!q)return;
   const main=document.getElementById('quests-main-area');
   const panel=document.getElementById('quests-info-panel');
@@ -8264,7 +8367,7 @@ function selectQuest(id){
   // 중앙 - 학생 목록 (선생님일때) or 내 진행상황
   if(canApprove){
     const stuList=[...DSTU.map((s,i)=>({...s,idx:i}))];
-    const qApprovals=questApprovals.filter(a=>a.qid===id);
+    const qApprovals=questApprovals.filter(a=>String(a.qid)===String(id));
     main.innerHTML=`<div style="padding:24px">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
         <div style="font-size:20px;font-weight:900;color:#0f172a">${escHtml(q.title)}</div>
@@ -8286,7 +8389,7 @@ function selectQuest(id){
           <button class="admtab">미완료 ${stuList.filter(s=>!qApprovals.find(a=>a.uid===s.id)).length}</button>
           <button class="admtab">완료 ${qApprovals.length}</button>
         </div>
-        <button class="btn btn-p btn-sm" onclick="bulkApproveQuest(${id},${q.reward})">보상 지급</button>
+        <button class="btn btn-p btn-sm" onclick="bulkApproveQuest('${id}',${q.reward})">보상 지급</button>
       </div>
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
         ${stuList.map(s=>{
@@ -8341,38 +8444,51 @@ function selectQuest(id){
     <div style="font-size:13px;color:#374151;line-height:1.6;margin-bottom:16px">${escHtml(q.desc)}</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
       <div style="background:#f8faff;border:1px solid #eef2f8;border-radius:12px;padding:12px;text-align:center">
-        <div style="font-size:22px;font-weight:900;color:#10b981">${questApprovals.filter(a=>a.qid===id).length}</div>
+        <div style="font-size:22px;font-weight:900;color:#10b981">${questApprovals.filter(a=>String(a.qid)===String(id)).length}</div>
         <div style="font-size:11px;color:#94a3b8;margin-top:2px">완료</div>
       </div>
       <div style="background:#fff9ec;border:1px solid #fde68a;border-radius:12px;padding:12px;text-align:center">
-        <div style="font-size:22px;font-weight:900;color:#f59e0b">${DSTU.length-questApprovals.filter(a=>a.qid===id).length}</div>
+        <div style="font-size:22px;font-weight:900;color:#f59e0b">${DSTU.length-questApprovals.filter(a=>String(a.qid)===String(id)).length}</div>
         <div style="font-size:11px;color:#94a3b8;margin-top:2px">미완료</div>
       </div>
     </div>
-    ${canApprove?`<button class="btn btn-r btn-sm" style="width:100%;margin-top:12px" onclick="deleteQuest(${id})">퀘스트 삭제</button>`:''}
+    ${canApprove?`<button class="btn btn-r btn-sm" style="width:100%;margin-top:12px" onclick="deleteQuest('${id}')">퀘스트 삭제</button>`:''}
   </div>`;
 }
 
 function showQuestApprovals(){
   const main=document.getElementById('quests-main-area');
-  if(main){
-    main.innerHTML=`<div style="padding:24px">
-      <div style="font-size:18px;font-weight:800;color:#92400e;margin-bottom:14px">⏳ 승인 대기 목록 (${questApprovals.length}건)</div>
-      ${questApprovals.map(a=>`<div style="display:flex;align-items:center;gap:12px;padding:14px;background:#fff;border:1.5px solid #fde68a;border-radius:14px;margin-bottom:8px">
-        <div style="width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#f59e0b,#d97706);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:900;color:#fff">${a.nm[0]}</div>
-        <div style="flex:1">
-          <div style="font-weight:700;color:#0f172a">${escHtml(a.nm)}</div>
-          <div style="font-size:12px;color:#64748b">📋 ${escHtml(a.title)}&nbsp;·&nbsp;+${a.reward} CC</div>
-        </div>
-        <button class="btn btn-s btn-sm" onclick="approveQuest(${a.qid},'${a.uid}',${a.reward})">승인</button>
-        <button class="btn btn-r btn-sm" onclick="rejectQuest(${a.qid},'${a.uid}')">반려</button>
-      </div>`).join('')}
-    </div>`;
+  if(!main)return;
+  if(!questApprovals.length){
+    // DB에서 다시 로드 시도
+    loadQuests().then(()=>{
+      if(!questApprovals.length){
+        main.innerHTML=`<div style="padding:40px;text-align:center;color:#94a3b8">
+          <div style="font-size:32px;margin-bottom:12px">✅</div>
+          <div style="font-size:15px;font-weight:700">대기 중인 승인이 없어요</div>
+        </div>`;
+      } else {
+        showQuestApprovals();
+      }
+    });
+    return;
   }
+  main.innerHTML=`<div style="padding:24px">
+    <div style="font-size:18px;font-weight:800;color:#92400e;margin-bottom:14px">⏳ 승인 대기 목록 (${questApprovals.length}건)</div>
+    ${questApprovals.map(a=>`<div style="display:flex;align-items:center;gap:12px;padding:14px;background:#fff;border:1.5px solid #fde68a;border-radius:14px;margin-bottom:8px">
+      <div style="width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#f59e0b,#d97706);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:900;color:#fff">${(a.nm||'?')[0]}</div>
+      <div style="flex:1">
+        <div style="font-weight:700;color:#0f172a">${escHtml(a.nm||'학생')}</div>
+        <div style="font-size:12px;color:#64748b">📋 ${escHtml(a.title)}&nbsp;·&nbsp;+${a.reward} CC</div>
+      </div>
+      <button class="btn btn-s btn-sm" onclick="approveQuest('${a.qid}','${a.uid}',${a.reward});setTimeout(showQuestApprovals,200)">승인</button>
+      <button class="btn btn-r btn-sm" onclick="rejectQuest('${a.qid}','${a.uid}');setTimeout(showQuestApprovals,200)">반려</button>
+    </div>`).join('')}
+  </div>`;
 }
 
 function bulkApproveQuest(qid,reward){
-  const pending=questApprovals.filter(a=>a.qid===qid);
+  const pending=questApprovals.filter(a=>String(a.qid)===String(qid));
   if(!pending.length){toast('승인 대기 학생이 없어요','i');return;}
   pending.forEach(a=>approveQuest(qid,a.uid,reward));
 }
@@ -8426,7 +8542,7 @@ async function buyItem(id){
   if(st>0){item.st=(item.st??item.stock)-1;item.stock=item.st;}
   const ex=CP.inventory.find(i=>i.id==='sh_'+id);
   if(ex)ex.qty=(ex.qty||1)+1;
-  else CP.inventory.push({id:'sh_'+id,nm,cat:item.cat||item.category||'기타',qty:1});
+  else CP.inventory.push({id:'sh_'+id,nm,cat:item.cat||item.category||'기타',ico:item.ico||item.emoji||'📦',qty:1});
   syncCoin();
   toast(`${nm} 구매! -${pr.toLocaleString()} CC`,'s');
   shopTab('items',null);
@@ -9462,8 +9578,17 @@ async function switchClass(classId,className,code){
   window._seatCache={}; window._seatRows=5; window._seatCols=6;
   // 자산순위 캐시 초기화
   window._rankCache=null;
+  // 학급 설정(시간제한, 수업메시지 등) 초기화
+  window._classSettings={};
+  // 시간 제한 화면이 열려있으면 닫기
+  const _tbs=document.getElementById('time-block-screen');if(_tbs)_tbs.remove();
   // 커스텀 직업 초기화
   customJobs=[];
+  // 전국/선생님 커뮤니티 초기화
+  if(typeof nationalPosts!=='undefined') nationalPosts=[];
+  if(typeof teacherPosts!=='undefined') teacherPosts=[];
+  // 주식 데이터 초기화
+  stockData=[];curStock=null;
   // DB 저장
   await sbSave(SB.from('profiles').update({class_id:classId,class_name:className}).eq('id',CU.id),'학급 전환 저장');
   // 실시간 구독 재연결
@@ -9474,6 +9599,7 @@ async function switchClass(classId,className,code){
     const{data}=await SB.from('classes').select('settings').eq('id',classId).single();
     if(data?.settings){
       const s=data.settings;
+      window._classSettings=s; // 전체 저장
       if(s.taxRules&&Array.isArray(s.taxRules)) taxRules=s.taxRules;
       if(s.taxHistory&&Array.isArray(s.taxHistory)) taxHistory=s.taxHistory;
       if(s.customJobs&&Array.isArray(s.customJobs)) customJobs=s.customJobs;
@@ -9481,6 +9607,8 @@ async function switchClass(classId,className,code){
       if(s.seatRows) window._seatRows=parseInt(s.seatRows)||5;
       if(s.seatCols) window._seatCols=parseInt(s.seatCols)||6;
       if(s.bankrupt_restrict!=null) BANKRUPT_RESTRICT=!!s.bankrupt_restrict;
+      // 학급 전환 후 시간제한 즉시 체크
+      if(CP?.role==='student') checkTimeRestrict();
     }
   }catch(_){}
   buildNav(); buildSidebar(); syncCoin();

@@ -2157,7 +2157,13 @@ function initRealtimeSubscriptions(){
         document.getElementById('app')?.classList.add('on');
         toast('✅ 정지가 해제됐어요!','s');
       }
-      Object.assign(CP,{role:d.role,job:d.job,job_salary:d.job_salary});
+      const prevJob=CP.job;
+      Object.assign(CP,{role:d.role,job:d.job,job_salary:d.job_salary,pending_job:d.pending_job||null,pendingJob:d.pending_job||null});
+      // 직업 승인됨 알림
+      if(d.job&&d.job!==prevJob&&d.job!=='학생'){
+        toast(`🎉 직업 승인됨: ${d.job}!`,'s');
+        if(document.getElementById('pg-jobs')?.classList.contains('on'))loadJobs();
+      }
     }).subscribe();
   _realtimeChannels.push(profileCh);
 
@@ -2240,7 +2246,7 @@ function initRealtimeSubscriptions(){
     const msgCh=SB.channel('chat_'+CP.class_id)
       .on('postgres_changes',{event:'INSERT',schema:'public',table:'channel_messages',filter:'class_id=eq.'+CP.class_id},(payload)=>{
         const d=payload.new;
-        if(!d||d.author_id===CU.id)return; // 내 메시지는 이미 표시됨
+        if(!d||String(d.author_id)===String(CU.id))return; // 내 메시지는 이미 표시됨
         const chId=d.channel_id||'general';
         if(!DSC_MSGS[chId])DSC_MSGS[chId]=[];
         const rtCol=`hsl(${(d.author_name||'').split('').reduce((a,c)=>a+c.charCodeAt(0),0)%360},55%,45%)`;
@@ -2517,7 +2523,7 @@ async function createClassAndContinue(){
       const{data:cl,error:clErr}=await SB.from('classes').insert({
         name:fullName,school,teacher_id:CU.id,
         code:Math.random().toString(36).slice(2,8).toUpperCase()
-      }).select().single();
+      }).select('*').single();
       if(!clErr&&cl){
         classId=cl.id;
         // 프로필에 class_id 업데이트
@@ -3977,7 +3983,7 @@ function renderJobCard(j){
   return `<div class="jcard${isCurrent?' on':''}" onclick="applyJob(${typeof j.id==='number'?j.id:JSON.stringify(j.id)})" style="cursor:pointer;position:relative;transition:.2s">
     ${isCurrent?'<div style="position:absolute;top:10px;right:10px;background:#eff6ff;border:1px solid #bfdbfe;color:#1d4ed8;font-size:10.5px;font-weight:700;padding:3px 8px;border-radius:99px">현재 직업</div>':''}
     ${j.custom?'<div style="position:absolute;top:10px;left:10px;background:#f5f3ff;border:1px solid #ddd6fe;color:#7c3aed;font-size:10px;font-weight:700;padding:2px 7px;border-radius:99px">커스텀</div>':''}
-    <div class="j-ico">${j.ico||'💼'}</div>
+    <div class="j-ico">${j.ico&&j.ico.startsWith('<')?j.ico:j.ico||'💼'}</div>
     <div class="j-name">${escHtml(j.nm)}</div>
     <div class="j-sal"><div class="cc-coin-ico cc-coin-ico-sm">C</div>주급 ${j.sal} CC</div>
     <div class="j-desc">${escHtml(j.desc||'')}</div>
@@ -4083,15 +4089,16 @@ function applyJob(id){
   const allJ=getAllJobs();
   const j=allJ.find(j=>j.id===id||String(j.id)===String(id));
   if(!j)return;
-  // 학생 역할이면 pendingJob에 저장, 선생님은 바로 적용
-  if(CP.role==='student'){
+  // 학생 역할이고 승인 필요한 직업이면 pendingJob에 저장
+  if(CP.role==='student'&&j.require_approval!==false){
     CP.pendingJob=j.nm; CP.pendingJobId=id;
     if(SB&&CU) sbSave(SB.from('profiles').update({pending_job:j.nm}).eq('id',CU.id),'직업 신청 저장');
     loadJobs();
     toast(j.nm+' 신청 완료! 선생님 승인 대기 중 ⏳','s');
   } else {
-    CP.job=j.nm; CP.job_salary=j.sal||0;
-    if(SB&&CU) sbSave(SB.from('profiles').update({job:j.nm,job_salary:j.sal||0}).eq('id',CU.id),'직업 저장');
+    // 선생님이거나 즉시 승인 직업이면 바로 적용
+    CP.job=j.nm; CP.job_salary=j.sal||0; CP.pendingJob=null;
+    if(SB&&CU) sbSave(SB.from('profiles').update({job:j.nm,job_salary:j.sal||0,pending_job:null}).eq('id',CU.id),'직업 저장');
     loadJobs();
     toast(j.nm+' 직업 적용됨 ✅','s');
   }
@@ -4443,7 +4450,7 @@ async function admTab(tab,btn){
         </div>
         <div style="font-size:11px;font-weight:700;color:#94a3b8;letter-spacing:1px;margin-bottom:8px">기본 직업 (${DJOBS.length}개)</div>
         ${DJOBS.map(j=>`<div style="background:#fff;border:1.5px solid #eef2f8;border-radius:14px;padding:14px 16px;margin-bottom:8px;display:flex;align-items:center;gap:12px">
-          <div style="width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,#eff6ff,#dbeafe);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0">${j.ico?.match?.(/\p{Emoji}/u)?.[0]||'💼'}</div>
+          <div style="width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,#eff6ff,#dbeafe);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0">${j.ico&&j.ico.startsWith('<')?j.ico:j.ico||'💼'}</div>
           <div style="flex:1">
             <div style="font-weight:700;font-size:14px">${escHtml(j.nm)}</div>
             <div style="font-size:12px;color:#64748b;margin-top:2px">주급 ${j.sal.toLocaleString()} CC · 권한 ${(j.perms||[]).length}개</div>
@@ -4453,7 +4460,7 @@ async function admTab(tab,btn){
         ${(typeof customJobs!=='undefined'&&customJobs.length)?`
         <div style="font-size:11px;font-weight:700;color:#94a3b8;letter-spacing:1px;margin:16px 0 8px">커스텀 직업 (${customJobs.length}개)</div>
         ${customJobs.map((j,i)=>`<div style="background:#fff;border:1.5px solid #e0eeff;border-radius:14px;padding:14px 16px;margin-bottom:8px;display:flex;align-items:center;gap:12px">
-          <div style="width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,#f5f3ff,#ede9fe);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0">${j.ico||'💼'}</div>
+          <div style="width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,#f5f3ff,#ede9fe);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0">${j.ico&&j.ico.startsWith('<')?j.ico:j.ico||'💼'}</div>
           <div style="flex:1">
             <div style="font-weight:700;font-size:14px">${escHtml(j.nm)}</div>
             <div style="font-size:12px;color:#64748b;margin-top:2px">주급 ${j.sal.toLocaleString()} CC · 권한 ${(j.perms||[]).length}개</div>
@@ -4794,9 +4801,10 @@ function admAssignJob(idx){
       <div style="display:flex;flex-direction:column;gap:8px;max-height:400px;overflow-y:auto" id="assign-job-list">
         ${jobItems.map((j,ji)=>{
           const isCur=s.job===(j.nm);
+          const icoHtml=j.ico&&j.ico.startsWith('<')?j.ico:`<span style="font-size:16px">${j.ico||'💼'}</span>`;
           return `<div class="assign-job-item" data-ji="${ji}" style="padding:10px 14px;border:1.5px solid ${isCur?'#3b82f6':'#eef2f8'};border-radius:12px;cursor:pointer;transition:.15s;background:${isCur?'#eff6ff':'#fff'}">
             <div style="display:flex;align-items:center;gap:8px">
-              <div style="font-weight:700;color:#0f172a">${escHtml((j.ico||'💼')+' '+(j.nm||'직업'))}</div>
+              <div style="display:flex;align-items:center;gap:6px;font-weight:700;color:#0f172a">${icoHtml}${escHtml(j.nm||'직업')}</div>
               <span class="chip chip-b" style="font-size:10px">주급 ${(j.sal||0).toLocaleString()} CC</span>
             </div>
             <div style="font-size:12px;color:#64748b;margin-top:2px">${escHtml(j.desc||'')}</div>
@@ -5058,7 +5066,7 @@ async function addQuest(){
     try{_qins=await SB.from('quests').insert({
       class_id:CP.class_id, title:t, description:d, reward:r,
       is_active:true, require_approval:reqApproval, created_by:CU.id
-    }).select().single();}catch(_){}
+    }).select('*').single();}catch(_){}
     const{data,error}=_qins;
     if(data) newId=data.id;
   }
@@ -5089,7 +5097,7 @@ async function addItem(){
         class_id:CP.class_id,name:nm,description:d,
         price:p,stock:s,category:cat,emoji:'📦',
         is_active:true,created_by:CU.id
-      }).select().single();
+      }).select('*').single();
       if(insErr)throw insErr;
       if(ins) shopItems.push({id:ins.id,nm:ins.name,desc:ins.description||'',cat:ins.category||'기타',pr:ins.price||100,st:ins.stock??-1,ico:ins.emoji||'📦',emoji:ins.emoji||'📦'});
     }catch(e){
@@ -5148,7 +5156,7 @@ async function addNotice(){
       const{data:nd}=await SB.from('notices').insert({
         title:t,content:b||'',class_id:CP.class_id,
         created_by:CU.id,is_global:false
-      }).select().single();
+      }).select('*').single();
       // DB 저장 후 캐시 무효화하여 최신 데이터 표시
       if(window._notices)window._notices._loaded=null;
     }catch(_){}
@@ -6664,7 +6672,11 @@ function escHtml(s){const d=document.createElement('div');d.textContent=s;return
 
 function loadBoard(){
   if(SB&&CU&&CP?.class_id&&CP?.id!=='demo'&&!CP?._isGuest){
-    SB.from('board_posts').select('id,author_name,content,image_url,created_at,author_id').eq('class_id',CP.class_id).order('created_at',{ascending:true}).limit(30)
+    SB.from('board_posts').select('id,author_name,content,image_url,created_at,author_id,school')
+      .eq('class_id',CP.class_id)
+      .not('school','like','__national__%')
+      .not('school','like','__teacher__%')
+      .order('created_at',{ascending:true}).limit(30)
       .then(({data})=>{
         if(data&&data.length){
           boardPosts=data.map(p=>({
@@ -6748,12 +6760,28 @@ function renderClassBoard(){
 
 function setBoardMode(mode){
   boardMode=mode;
-  // board-content 스타일 리셋 (board/widgets 모드)
   if(mode!=='discord'){
     const bc=document.getElementById('board-content');
     if(bc){bc.style.overflow='';bc.style.padding='';bc.style.display='';bc.style.flexDirection='';}
   }
-  renderClassBoard();
+  if(mode==='discord'&&SB&&CU&&CP?.class_id&&CP?.id!=='demo'&&!CP?._isGuest){
+    // DB에서 채널 목록 불러오기
+    SB.from('channels').select('id,name,type,description').eq('class_id',CP.class_id).order('created_at')
+      .then(({data})=>{
+        if(data&&data.length){
+          // 기본 채널은 유지하고, DB 채널 중 중복 아닌 것만 추가
+          data.forEach(ch=>{
+            if(!DSC_CHANNELS.find(c=>c.id===ch.id)){
+              DSC_CHANNELS.push({id:ch.id,nm:ch.name,type:ch.type||'text',desc:ch.description||''});
+              if(!DSC_MSGS[ch.id])DSC_MSGS[ch.id]=[];
+            }
+          });
+        }
+        renderClassBoard();
+      }).catch(()=>renderClassBoard());
+  } else {
+    renderClassBoard();
+  }
 }
 
 /* --- SNS 게시판 렌더링 --- */
@@ -6795,12 +6823,16 @@ function renderBoardSNS(){
 
 function renderPost(p){
   const isLiked=p.likes.includes(CP.name||'나');
-  const av=AVATARS?.find(a=>a.id===CP.equippedAvatar);
   const roleColor={teacher:'#1d4ed8',dev:'#6d28d9',student:'#15803d'}[p.role]||'#15803d';
+  // 아바타 표시: 커스텀 이미지 있으면 img, 없으면 이름 첫 글자
+  const avHtml=p.avatarUrl
+    ?`<img src="${p.avatarUrl}" style="width:38px;height:38px;border-radius:50%;object-fit:cover;flex-shrink:0" onerror="this.style.display='none';this.nextSibling.style.display='flex'">`
+    :``;
+  const avFallback=`<div style="width:38px;height:38px;border-radius:50%;background:${p.col};display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;color:#fff;flex-shrink:0${p.avatarUrl?';display:none':''}">${(p.author||'?')[0]}</div>`;
   return `<div id="post-${p.id}" style="background:#fff;border:1.5px solid #eef2f8;border-radius:18px;overflow:hidden;margin-bottom:14px;box-shadow:0 2px 8px rgba(0,0,0,.05);transition:.2s" onmouseover="this.style.borderColor='#d1d9ef'" onmouseout="this.style.borderColor='#eef2f8'">
     <!-- 헤더 -->
     <div style="padding:14px 16px 10px;display:flex;align-items:center;gap:10px">
-      <div style="width:38px;height:38px;border-radius:50%;background:${p.col};display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;color:#fff;flex-shrink:0">${p.author[0]}</div>
+      <div style="position:relative;flex-shrink:0;display:flex">${avHtml}${avFallback}</div>
       <div style="flex:1">
         <div style="font-size:14px;font-weight:800;color:#0f172a;display:flex;align-items:center;gap:6px">
           ${escHtml(p.author)}
@@ -6829,7 +6861,7 @@ function renderPost(p){
     <!-- 댓글 -->
     ${p.comments.length?`<div style="background:#f8faff;padding:10px 16px;border-top:1px solid #f1f5f9;display:flex;flex-direction:column;gap:8px">
       ${p.comments.map(cm=>`<div style="display:flex;gap:9px;align-items:flex-start">
-        <div style="width:28px;height:28px;border-radius:50%;background:${cm.col};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:#fff;flex-shrink:0">${cm.author[0]}</div>
+        <div style="width:28px;height:28px;border-radius:50%;background:${cm.col||'#94a3b8'};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:#fff;flex-shrink:0">${(cm.author||'?')[0]}</div>
         <div style="flex:1;background:#fff;border:1px solid #eef2f8;border-radius:12px;padding:8px 12px">
           <span style="font-size:12.5px;font-weight:700;color:#0f172a">${escHtml(cm.author)}</span>
           <span style="font-size:11px;color:#94a3b8;margin-left:6px">${cm.ts}</span>
@@ -6839,8 +6871,8 @@ function renderPost(p){
     </div>`:''}
     <!-- 댓글 입력 -->
     <div style="padding:10px 16px;background:#fafbff;border-top:1px solid #f1f5f9;display:flex;gap:9px;align-items:center" id="comment-area-${p.id}">
-      <div style="width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#1d4ed8,#3b82f6);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:#fff;flex-shrink:0">${(CP.name||'?')[0]}</div>
-      <input id="comment-input-${p.id}" style="flex:1;padding:8px 12px;background:#fff;border:1.5px solid #e2e8f0;border-radius:12px;font-size:13px;color:#374151;outline:none;font-family:var(--font)" placeholder="댓글 남기기..." onfocus="this.style.borderColor='#3b82f6'" onblur="this.style.borderColor='#e2e8f0'" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();submitComment(${p.id});}">
+      ${CP.customAvatarImg?`<img src="${CP.customAvatarImg}" style="width:28px;height:28px;border-radius:50%;object-fit:cover;flex-shrink:0">`:`<div style="width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#1d4ed8,#3b82f6);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:#fff;flex-shrink:0">${(CP.name||'?')[0]}</div>`}
+      <input id="comment-input-${p.id}" style="flex:1;padding:8px 12px;background:#fff;border:1.5px solid #e2e8f0;border-radius:12px;font-size:13px;color:#374151;outline:none;font-family:var(--font)" placeholder="댓글 남기기..." onfocus="this.style.borderColor='#3b82f6'" onblur="this.style.borderColor='#e2e8f0'" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();submitComment('${p.id}');}">
       <button onclick="submitComment('${p.id}')" style="width:32px;height:32px;border:none;background:#1d4ed8;border-radius:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:.15s" onmouseover="this.style.background='#1e40af'" onmouseout="this.style.background='#1d4ed8'">
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M12 7H2M8 3l4 4-4 4" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
@@ -6946,7 +6978,7 @@ async function submitBoardPost(){
 
   const newId=++boardPostId+Date.now()%10000;
   const localImg=imgUrl||newPostImgData; // Storage 성공 시 URL, 실패 시 로컬 미리보기
-  boardPosts.push({id:newId,author:CP.name||'나',role:CP.role,col,txt,ts,img:localImg,likes:[],comments:[]});
+  boardPosts.push({id:newId,author:CP.name||'나',role:CP.role,col,txt,ts,img:localImg,likes:[],comments:[],avatarUrl:CP.customAvatarImg||null});
   if(input)input.value='';
   newPostImgData=null;
   const prev=document.getElementById('new-post-img-preview');
@@ -6986,7 +7018,7 @@ function toggleLike(id){
       likeBtn.innerHTML=`<svg width="14" height="14" viewBox="0 0 14 14" fill="${isLiked?'#ec4899':'none'}"><path d="M7 12S1.5 8.5 1.5 4.8C1.5 3 3 1.5 4.8 1.5c1 0 1.9.5 2.5 1.3.6-.8 1.5-1.3 2.5-1.3C11.6 1.5 13 3 12.5 4.8 12.5 8.5 7 12 7 12z" stroke="${isLiked?'#ec4899':'currentColor'}" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>${p.likes.length||''}`;
     }
   }
-  if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest&&String(id).length>10){
+  if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest&&String(id).includes("-")){
     if(isNowLiked){
       SB.from('board_post_likes').upsert({post_id:String(id),user_name:nm},{onConflict:'post_id,user_name'}).then(()=>{},()=>{});
     } else {
@@ -7013,7 +7045,7 @@ function submitComment(id){
   if(container){
     container.innerHTML=boardPosts.slice().reverse().map(pp=>renderPost(pp)).join('');
   }
-  if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest&&String(id).length>10){
+  if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest&&String(id).includes("-")){
     SB.from('board_post_comments').insert({post_id:String(id),author_name:CP.name||'나',content:txt}).then(()=>{},()=>{});
   }
   toast('댓글 등록!','s');
@@ -7493,8 +7525,10 @@ function loadComm(){
     if(mineBtn){mineBtn.style.display='';mineBtn.style.order='2';}
     commTab('national-teacher', natTeachBtn);
   } else {
-    // 학생: 전국학생커뮤만
+    // 학생: 전국학생커뮤 + 플러그인 스토어 + 내 플러그인
     if(natStudBtn){natStudBtn.style.display='';}
+    if(storeBtn){storeBtn.style.display='';}
+    if(mineBtn){mineBtn.style.display='';}
     commTab('national', natStudBtn);
   }
 }
@@ -7538,7 +7572,6 @@ function commTab(tab,btn){
     acts.innerHTML=`<div class="srch"><svg class="srch-ic" width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="5.5" cy="5.5" r="4" stroke="currentColor" stroke-width="1.4"/><path d="M9 9l3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><input class="srch-in" id="plg-srch" placeholder="플러그인 검색..." oninput="filterPlugins(this.value)"></div>`;
     renderStore(getAllPlugins());
   } else if(tab==='mine'){
-    if(CP.role!=='teacher'&&CP.role!=='dev'){toast('선생님만 사용할 수 있어요','e');commTab('national',document.querySelector('#comm-tabs .admtab'));return;}
     acts.innerHTML='<button class="btn btn-p btn-sm" onclick="openPluginEditor()">새 플러그인 만들기</button>';
     renderMyPlugins();
   } else if(tab==='create'){
@@ -7575,7 +7608,7 @@ function renderNationalPost(p){
     </div>
     <div style="padding:0 16px 12px;font-size:14px;color:#374151;line-height:1.65;white-space:pre-wrap">${escHtml(p.content)}</div>
     <div style="padding:10px 16px;border-top:1px solid #f1f5f9;display:flex;gap:10px">
-      <button onclick="toggleNLike(${p.id})" style="display:flex;align-items:center;gap:5px;padding:6px 12px;border:1.5px solid ${isLiked?'#ec4899':'#e2e8f0'};background:${isLiked?'#fff0f6':'#fff'};border-radius:99px;cursor:pointer;font-size:13px;font-weight:700;color:${isLiked?'#ec4899':'#64748b'};transition:.15s">
+      <button onclick="toggleNLike('${p.id}')" style="display:flex;align-items:center;gap:5px;padding:6px 12px;border:1.5px solid ${isLiked?'#ec4899':'#e2e8f0'};background:${isLiked?'#fff0f6':'#fff'};border-radius:99px;cursor:pointer;font-size:13px;font-weight:700;color:${isLiked?'#ec4899':'#64748b'};transition:.15s">
         <svg width="14" height="14" viewBox="0 0 14 14" fill="${isLiked?'#ec4899':'none'}"><path d="M7 12S1.5 8.5 1.5 5C1.5 3.2 3 1.5 4.8 1.5c1 0 1.9.5 2.5 1.3.6-.8 1.5-1.3 2.5-1.3C11.6 1.5 12.5 3.2 12.5 5 12.5 8.5 7 12 7 12z" stroke="${isLiked?'#ec4899':'currentColor'}" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
         ${p.likes.length||''}
       </button>
@@ -7595,7 +7628,7 @@ function renderNationalPost(p){
       </div>`).join('')}
     </div>`:''}
     <div style="padding:10px 16px;border-top:1px solid #f1f5f9;display:flex;gap:8px" id="nc-area-${p.id}">
-      <input id="nc-input-${p.id}" style="flex:1;padding:8px 12px;background:#f8faff;border:1.5px solid #e2e8f0;border-radius:12px;font-size:13px;outline:none;font-family:var(--font)" placeholder="댓글..." onfocus="this.style.borderColor='#3b82f6';this.style.background='#fff'" onblur="this.style.borderColor='#e2e8f0';this.style.background='#f8faff'" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();submitNComment(${p.id});}">
+      <input id="nc-input-${p.id}" style="flex:1;padding:8px 12px;background:#f8faff;border:1.5px solid #e2e8f0;border-radius:12px;font-size:13px;outline:none;font-family:var(--font)" placeholder="댓글..." onfocus="this.style.borderColor='#3b82f6';this.style.background='#fff'" onblur="this.style.borderColor='#e2e8f0';this.style.background='#f8faff'" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();submitNComment('${p.id}');}">
       <button onclick="submitNComment('${p.id}')" style="width:32px;height:32px;border:none;background:#1d4ed8;border-radius:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0" onmouseover="this.style.background='#1e40af'" onmouseout="this.style.background='#1d4ed8'">
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M12 7H2M8 3l4 4-4 4" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
@@ -7611,9 +7644,11 @@ function toggleNLike(id){
   if(idx>=0)p.likes.splice(idx,1);else p.likes.push(nm);
   const el=document.getElementById('np-'+id);
   if(el){const newHtml=renderNationalPost(p);const tmp=document.createElement('div');tmp.innerHTML=newHtml;el.replaceWith(tmp.firstChild);}
-  // 좋아요는 board_post_likes 테이블 사용
   if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest&&p.id){
     const isLiked=p.likes.includes(nm);
+    // board_posts.likes 컬럼 업데이트 (로드 시 사용)
+    SB.from('board_posts').update({likes:JSON.stringify(p.likes)}).eq('id',String(p.id)).then(()=>{},()=>{});
+    // board_post_likes 테이블에도 저장 (중복 방지용)
     if(isLiked){
       SB.from('board_post_likes').upsert({post_id:String(p.id),user_name:nm},{onConflict:'post_id,user_name'}).then(()=>{},()=>{});
     } else {
@@ -8431,8 +8466,8 @@ function openProfile(targetCP){
         ${p.job&&p.job!=='무직'?`<span class="chip chip-a">${p.job}</span>`:''}
       </div>
       ${isMe?`<div style="display:flex;align-items:stretch;gap:8px;margin:8px 0 2px">
-        <textarea id="bio-input" class="fi" rows="3" style="resize:none;font-size:13px;padding:10px 12px;flex:1;min-height:76px;height:76px;line-height:1.5;box-sizing:border-box" placeholder="소개를 입력하세요...">${escHtml(p.bio||'')}</textarea>
-        <button class="btn btn-p" onclick="saveBio()" style="height:76px;min-height:76px;padding:0 16px;flex-shrink:0;white-space:nowrap;font-size:13px;align-self:stretch;box-sizing:border-box">저장</button>
+        <textarea id="bio-input" class="fi" rows="2" style="resize:none;font-size:13px;padding:8px 12px;flex:1;min-height:56px;height:56px;max-height:80px;line-height:1.5;box-sizing:border-box" placeholder="소개를 입력하세요...">${escHtml(p.bio||'')}</textarea>
+        <button class="btn btn-p btn-sm" onclick="saveBio()" style="height:56px;min-height:56px;padding:0 14px;flex-shrink:0;white-space:nowrap;font-size:13px;align-self:stretch;box-sizing:border-box">저장</button>
       </div>`:`<div class="prof-bio">${escHtml(p.bio||'소개가 없어요 👋')}</div>`}
       <div class="prof-stats">
         <div class="prof-stat">
@@ -9186,7 +9221,7 @@ async function confirmListMarket(){
       const{data:_ml,error:_mle}=await SB.from('market_listings').insert({
         class_id:CP.class_id,seller_id:CU.id,seller_name:CP.name||'판매자',
         item_id:selId,item_name:it.nm,item_icon:it.ico||'🏷️',price:pr,status:'active'
-      }).select().single();
+      }).select('*').single();
       if(!_mle)ml=_ml;
     }catch(_){}
     // 로컬 id를 DB id로 교체
@@ -9257,6 +9292,7 @@ function useJobAbility(){
 
 async function loadJobs(){
   const isTeacher=CP?.role==='teacher'||CP?.role==='dev'||CP?.role==='superadmin';
+  // 학생도 직업이 있으면 '내 직업' 탭 항상 표시 (이미 HTML에 있음)
   const jmt=document.getElementById('jobs-tab-manage');
   const jat=document.getElementById('jobs-tab-approval');
   if(jmt)jmt.style.display=isTeacher?'':'none';
@@ -9350,21 +9386,31 @@ function jobsTab(tab,btn){
     </div>`;
   } else if(tab==='my'){
     const curJob=allJobs.find(j=>j.nm===CP?.job);const myPerms=curJob?.perms||[];
+    // 권한별 바로가기 버튼 생성
+    const permActions=[];
+    if(myPerms.includes('shop_manage')||myPerms.includes('상점 관리')) permActions.push(`<button class="btn btn-p btn-sm" onclick="goPage('pg-shop');shopTab('items',null)">🏪 상점 관리</button>`);
+    if(myPerms.includes('공지 작성')) permActions.push(`<button class="btn btn-p btn-sm" onclick="goPage('pg-admin');admTab('notice',null)">📢 공지 작성</button>`);
+    if(myPerms.includes('좌석 배치')) permActions.push(`<button class="btn btn-p btn-sm" onclick="goPage('pg-admin');admTab('seating',null)">💺 자리 배치</button>`);
     el.innerHTML=`<div style="max-width:100%">${curJob?`
       <div style="background:linear-gradient(135deg,#eff6ff,#dbeafe);border:1.5px solid #bfdbfe;border-radius:18px;padding:20px;margin-bottom:20px;display:flex;align-items:center;gap:16px">
-        <div style="width:56px;height:56px;border-radius:16px;background:linear-gradient(135deg,#1d4ed8,#3b82f6);display:flex;align-items:center;justify-content:center;font-size:26px;flex-shrink:0">${curJob.ico||'💼'}</div>
+        <div style="width:56px;height:56px;border-radius:16px;background:linear-gradient(135deg,#1d4ed8,#3b82f6);display:flex;align-items:center;justify-content:center;font-size:26px;flex-shrink:0">${curJob.ico&&curJob.ico.startsWith('<')?curJob.ico:curJob.ico||'💼'}</div>
         <div style="flex:1"><div style="font-size:18px;font-weight:900;color:#0f172a">${escHtml(curJob.nm)}</div>
           <div style="font-size:13px;color:#64748b;margin-top:2px">${escHtml(curJob.desc||'')}</div>
           <div style="display:flex;align-items:center;gap:6px;margin-top:8px"><div class="cc-coin-ico cc-coin-ico-sm">C</div><span style="font-size:14px;font-weight:800;color:#b45309">주급 ${curJob.sal} CC</span></div>
         </div>
       </div>
-      <div style="background:#fff;border:1.5px solid #eef2f8;border-radius:16px;padding:18px">
+      <div style="background:#fff;border:1.5px solid #eef2f8;border-radius:16px;padding:18px;margin-bottom:16px">
         <div style="font-size:14px;font-weight:800;color:#0f172a;margin-bottom:12px">🔑 내 권한</div>
         ${myPerms.length?`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px">
           ${myPerms.map(p=>{const pi=typeof ALL_PERMISSIONS!=='undefined'?ALL_PERMISSIONS.find(x=>x.id===p||x.label===p):null;
             return `<div style="display:flex;align-items:center;gap:7px;padding:8px 12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px"><span style="font-size:16px">${pi?.icon||'✓'}</span><span style="font-size:12.5px;font-weight:600;color:#065f46">${pi?.label||escHtml(p)}</span></div>`;}).join('')}
         </div>`:'<div style="color:#94a3b8;font-size:13px">현재 특별 권한이 없어요</div>'}
-      </div>`:'<div class="empty"><div class="empty-t">아직 직업이 없어요</div><div class="empty-s">직업 목록에서 신청해보세요</div></div>'}
+      </div>
+      ${permActions.length?`<div style="background:#fff;border:1.5px solid #eef2f8;border-radius:16px;padding:18px">
+        <div style="font-size:14px;font-weight:800;color:#0f172a;margin-bottom:12px">⚡ 권한 바로가기</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px">${permActions.join('')}</div>
+      </div>`:''}
+      `:'<div class="empty"><div class="empty-t">아직 직업이 없어요</div><div class="empty-s">직업 목록에서 신청해보세요</div></div>'}
     </div>`;
   } else if(tab==='manage'){
     const cj=typeof customJobs!=='undefined'?customJobs:[];
@@ -9375,7 +9421,7 @@ function jobsTab(tab,btn){
       </div>
       <div style="font-size:11px;font-weight:700;color:#94a3b8;letter-spacing:1px;margin-bottom:8px">기본 직업</div>
       ${DJOBS.map(j=>`<div style="background:#fff;border:1.5px solid #eef2f8;border-radius:14px;padding:14px 16px;margin-bottom:8px;display:flex;align-items:center;gap:12px">
-        <span style="font-size:22px">${j.ico?.match(/\p{Emoji}/u)?.[0]||'💼'}</span>
+        <span style="font-size:22px;display:flex;align-items:center">${j.ico&&j.ico.startsWith('<')?j.ico:j.ico||'💼'}</span>
         <div style="flex:1"><div style="font-weight:700">${escHtml(j.nm)}</div><div style="font-size:12px;color:#64748b">급여 ${j.sal} CC</div></div>
         <button class="btn btn-g btn-xs" onclick="editJobPerms(${j.id})">권한 편집</button>
       </div>`).join('')}
@@ -9635,11 +9681,11 @@ function renderTeacherPost(p){
         <div style="font-size:14px;font-weight:800;color:#0f172a">${escHtml(p.author)}</div>
         <div style="font-size:11.5px;color:#94a3b8">${escHtml(p.school||'')} · 선생님 · ${p.ts}</div>
       </div>
-      ${p.author===CP?.name?`<button onclick="deleteTeacherPost(${p.id})" style="padding:5px;border:none;background:none;cursor:pointer;color:#94a3b8;border-radius:8px"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 3.5h10M5 3.5V2.5a.5.5 0 01.5-.5h3a.5.5 0 01.5.5v1M11 3.5l-.5 8H3.5l-.5-8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button>`:''}
+      ${p.author===CP?.name?`<button onclick="deleteTeacherPost('${p.id}')" style="padding:5px;border:none;background:none;cursor:pointer;color:#94a3b8;border-radius:8px"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 3.5h10M5 3.5V2.5a.5.5 0 01.5-.5h3a.5.5 0 01.5.5v1M11 3.5l-.5 8H3.5l-.5-8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button>`:''}
     </div>
     <div style="padding:0 16px 12px;font-size:14px;color:#374151;line-height:1.65;white-space:pre-wrap">${escHtml(p.content)}</div>
     <div style="padding:10px 16px;border-top:1px solid #f1f5f9;display:flex;gap:10px">
-      <button onclick="toggleTeacherLike(${p.id})" style="display:flex;align-items:center;gap:5px;padding:6px 12px;border:1.5px solid ${isLiked?'#ec4899':'#e2e8f0'};background:${isLiked?'#fff0f6':'#fff'};border-radius:99px;cursor:pointer;font-size:13px;font-weight:700;color:${isLiked?'#ec4899':'#64748b'};transition:.15s">
+      <button onclick="toggleTeacherLike('${p.id}')" style="display:flex;align-items:center;gap:5px;padding:6px 12px;border:1.5px solid ${isLiked?'#ec4899':'#e2e8f0'};background:${isLiked?'#fff0f6':'#fff'};border-radius:99px;cursor:pointer;font-size:13px;font-weight:700;color:${isLiked?'#ec4899':'#64748b'};transition:.15s">
         <svg width="14" height="14" viewBox="0 0 14 14" fill="${isLiked?'#ec4899':'none'}"><path d="M7 12S1.5 8.5 1.5 5C1.5 3.2 3 1.5 4.8 1.5c1 0 1.9.5 2.5 1.3.6-.8 1.5-1.3 2.5-1.3C11.6 1.5 12.5 3.2 12.5 5 12.5 8.5 7 12 7 12z" stroke="${isLiked?'#ec4899':'currentColor'}" stroke-width="1.4"/></svg>
         ${p.likes.length||''}
       </button>
@@ -9729,21 +9775,21 @@ async function submitNationalPost(type){
   else commTab('national',null);
 }
 function toggleTeacherLike(id){
-  const p=teacherPosts.find(p=>p.id===id);if(!p)return;
+  const p=teacherPosts.find(p=>String(p.id)===String(id));if(!p)return;
   const nm=CP?.name||'나';
   const idx=p.likes.indexOf(nm);
   if(idx>=0)p.likes.splice(idx,1);else p.likes.push(nm);
   const el=document.getElementById('tp-'+id);
   if(el){const tmp=document.createElement('div');tmp.innerHTML=renderTeacherPost(p);el.replaceWith(tmp.firstChild);}
-  if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest&&typeof p.id==='string'&&p.id.length>10){
-    sbSave(SB.from('board_posts').update({likes:JSON.stringify(p.likes)}).eq('id',p.id),'게시판 저장');
+  if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest&&String(p.id).includes('-')){
+    sbSave(SB.from('board_posts').update({likes:JSON.stringify(p.likes)}).eq('id',String(p.id)),'게시판 저장');
   }
 }
 function deleteTeacherPost(id){
-  const p=teacherPosts.find(x=>x.id===id);
-  teacherPosts=teacherPosts.filter(p=>p.id!==id);
-  if(SB&&CU&&CP?.id!=='demo'&&p&&typeof p.id==='string'&&p.id.length>10){
-    sbSave(SB.from('board_posts').delete().eq('id',p.id).eq('author_id',CU.id),'게시판 저장');
+  const p=teacherPosts.find(x=>String(x.id)===String(id));
+  teacherPosts=teacherPosts.filter(p=>String(p.id)!==String(id));
+  if(SB&&CU&&CP?.id!=='demo'&&p&&String(p.id).includes('-')){
+    sbSave(SB.from('board_posts').delete().eq('id',String(p.id)).eq('author_id',CU.id),'게시판 저장');
   }
   document.getElementById('tp-'+id)?.remove();
   toast('삭제됨','i');
@@ -9901,7 +9947,7 @@ async function createNewClass(){
     teacher_id:CU.id,
     code,
     school:CP?.school||''
-  }).select().single();
+  }).select('*').single();
   if(error){toast('학급 생성 실패: '+error.message,'e');return;}
   toast(`✅ ${nm} 학급 생성! 코드: ${code}`,'s');
   // 현재 학급 변경 여부 확인

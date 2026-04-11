@@ -1333,14 +1333,21 @@ hr.div{border:none;border-top:1px solid #f1f5f9;margin:16px 0;}
     <div class="fg"><label class="fl">상품명</label><input class="fi" id="ai-nm" placeholder="상품 이름"></div>
     <div class="fg"><label class="fl">설명</label><input class="fi" id="ai-d" placeholder="설명"></div>
     <div class="fg"><label class="fl">카테고리</label>
-      <select class="fi" id="ai-cat">
-        <option value="권리">권리</option>
-        <option value="간식">간식</option>
-        <option value="도구">도구</option>
-        <option value="공동구매">공동구매</option>
-        <option value="아바타">아바타</option>
-        <option value="기타" selected>기타</option>
-      </select>
+      <div class="cs" id="cs-ai-cat">
+        <button type="button" class="cs-btn" data-val="기타" onclick="csToggle('cs-ai-cat')">
+          <span class="cs-val">기타</span>
+          <span class="cs-arr"><svg width="10" height="6" viewBox="0 0 10 6" fill="none"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        </button>
+        <div class="cs-drop" id="cs-ai-cat-drop">
+          <div class="cs-opt" data-v="권리" onclick="csSelect('cs-ai-cat','권리','권리',this);document.getElementById('ai-cat').value='권리'">권리</div>
+          <div class="cs-opt" data-v="간식" onclick="csSelect('cs-ai-cat','간식','간식',this);document.getElementById('ai-cat').value='간식'">간식</div>
+          <div class="cs-opt" data-v="도구" onclick="csSelect('cs-ai-cat','도구','도구',this);document.getElementById('ai-cat').value='도구'">도구</div>
+          <div class="cs-opt" data-v="공동구매" onclick="csSelect('cs-ai-cat','공동구매','공동구매',this);document.getElementById('ai-cat').value='공동구매'">공동구매</div>
+          <div class="cs-opt" data-v="아바타" onclick="csSelect('cs-ai-cat','아바타','아바타',this);document.getElementById('ai-cat').value='아바타'">아바타</div>
+          <div class="cs-opt sel" data-v="기타" onclick="csSelect('cs-ai-cat','기타','기타',this);document.getElementById('ai-cat').value='기타'">기타</div>
+        </div>
+      </div>
+      <input type="hidden" id="ai-cat" value="기타">
     </div>
     <div class="fg"><label class="fl">가격 (CC)</label><input class="fi" id="ai-p" type="number" placeholder="100"></div>
     <div class="fg"><label class="fl">재고 (-1=무제한)</label><input class="fi" id="ai-s" type="number" placeholder="-1"></div>
@@ -1575,6 +1582,8 @@ function isBankrupt(){
 }
 
 function checkBankruptBlock(actionLabel){
+  // 선생님/dev/superadmin은 파산 제한 없음
+  if(CP?.role==='teacher'||CP?.role==='dev'||CP?.role==='superadmin')return false;
   // 파산 제한 중이면 토스트 띄우고 true 반환 (차단)
   if(isBankrupt()){
     toast(`💸 잔액 부족으로 ${actionLabel||'경제 활동'}이 제한됩니다. 퀘스트로 코인을 먼저 벌어요!`,'e');
@@ -1636,8 +1645,15 @@ function checkTimeRestrict(){
       },1000);
     }
     blocker.style.display='flex';
+  } else {
+    // 허용 시간 내 — 차단 화면 제거
+    const blocker=document.getElementById('time-block-screen');
+    if(blocker)blocker.remove();
+    document.getElementById('app')?.classList.add('on');
   }
 }
+// 30초마다 시간 제한 재확인 (학생 우회 방지)
+setInterval(()=>{if(CP?.role==='student')checkTimeRestrict();},30000);
 
 function saveBankruptSetting(){
   try{localStorage.setItem('cw_bankrupt_restrict',BANKRUPT_RESTRICT?'1':'0');}catch(_){}
@@ -2128,6 +2144,18 @@ function initRealtimeSubscriptions(){
       if(d.is_suspended&&!CP.is_suspended){
         CP.is_suspended=true;
         toast('⚠️ 계정이 정지됐어요. 선생님께 문의하세요','e');
+        // 즉시 앱 차단
+        setTimeout(()=>{
+          document.getElementById('app')?.classList.remove('on');
+          let bl=document.getElementById('blocked');
+          if(bl){bl.classList.add('on');const bm=document.getElementById('blk-msg');if(bm)bm.textContent=d.suspension_reason||'계정이 정지되었습니다. 선생님께 문의하세요.';}
+        },500);
+      }
+      if(d.is_suspended===false&&CP.is_suspended){
+        CP.is_suspended=false;
+        document.getElementById('blocked')?.classList.remove('on');
+        document.getElementById('app')?.classList.add('on');
+        toast('✅ 정지가 해제됐어요!','s');
       }
       Object.assign(CP,{role:d.role,job:d.job,job_salary:d.job_salary});
     }).subscribe();
@@ -2309,7 +2337,12 @@ function showApp(){
   if(!CP.equippedBanner)   CP.equippedBanner=null;
   if(!CP.bio)              CP.bio='안녕하세요! 반갑습니다 👋';
   if(CP.balance===undefined) CP.balance=0;
-  if(CP.is_suspended){document.getElementById('blocked').classList.add('on');document.getElementById('blk-msg').textContent='계정이 정지되었습니다.';return;}
+  if(CP.is_suspended){
+    const blkEl=document.getElementById('blocked');
+    const blkMsg=document.getElementById('blk-msg');
+    if(blkEl){blkEl.classList.add('on');if(blkMsg)blkMsg.textContent=CP.suspension_reason||'계정이 정지되었습니다. 선생님께 문의하세요.';}
+    return;
+  }
   // 선생님인데 학급이 없으면 학급 셋업 화면
   if((CP.role==='teacher'||CP.role==='dev'||CP.role==='superadmin')&&CP.role!=='superadmin'&&!CP.class_id&&!CP._setupDone){
     showClassSetup();return;
@@ -2373,21 +2406,60 @@ function showApp(){
         const neis=schedEvents.filter(e=>e.neis);
         schedEvents=[...s.schedEvents.filter(e=>!e.neis),...neis];
       }
-      // 설정 로드 즉시 시간 제한 체크
+      // 파산 제한 설정 DB 기준으로 덮어쓰기
+      if(s.bankrupt_restrict!=null){BANKRUPT_RESTRICT=!!s.bankrupt_restrict;saveBankruptSetting();}
+      // 접속 시간 제한 즉시 체크 (학생이면 시간 제한 강제 적용)
       if(CP?.role==='student') checkTimeRestrict();
+      // 급식/일정용 학교코드 학급 설정에서 복원
+      if(s.schoolCode&&s.officeCode&&!CP.school_code){
+        CP.school_code=s.schoolCode; CP.office_code=s.officeCode;
+        if(s.schoolName&&!CP.school) CP.school=s.schoolName;
+        window._niceSchoolCode=s.schoolCode; window._niceOfficeCode=s.officeCode;
+      }
+      // 공지 로드
+      if(!window._notices||window._notices._loaded!==CP.class_id) renderNotices();
     }).then(()=>{},()=>{});
-  }
-  initRealtimeSubscriptions();
-  // 공지 Supabase에서 로드
-  if(SB&&CP?.class_id&&CP?.id!=='demo'&&!CP?._isGuest){
-    SB.from('notices').select('id,title,content,created_at').eq('class_id',CP.class_id).order('created_at',{ascending:false}).limit(10)
+    // 공지 로드 - 선생님/학생 모두
+    SB.from('notices').select('id,title,content,created_at').eq('class_id',CP.class_id).order('created_at',{ascending:false}).limit(20)
       .then(({data})=>{
         if(data&&data.length){
           window._notices=data.map(n=>({id:n.id,t:n.title,b:n.content||'',d:new Date(n.created_at).toLocaleDateString('ko-KR'),lvl:'normal'}));
-          window._notices._loaded=CP.class_id;
-          if(document.getElementById('notices'))renderNotices();
+        } else {
+          if(!window._notices)window._notices=[];
         }
+        window._notices._loaded=CP.class_id;
+        if(document.getElementById('notices'))renderNotices();
       }).catch(()=>{});
+  }
+  initRealtimeSubscriptions();
+  // 30초마다 학급 settings 재동기화 (파산제한/접속제한 우회 방지)
+  if(SB&&CP?.class_id&&CP?.id!=='demo'&&!CP?._isGuest){
+    setInterval(async()=>{
+      if(!SB||!CP?.class_id)return;
+      try{
+        const{data}=await SB.from('classes').select('settings').eq('id',CP.class_id).single();
+        if(!data?.settings)return;
+        const s=data.settings;
+        window._classSettings=Object.assign(window._classSettings||{},s);
+        if(s.bankrupt_restrict!=null){BANKRUPT_RESTRICT=!!s.bankrupt_restrict;saveBankruptSetting();}
+        if(CP?.role==='student')checkTimeRestrict();
+        // 계정 정지 상태 재확인
+        const{data:pd}=await SB.from('profiles').select('is_suspended,suspension_reason,balance,credit_score,credit_grade').eq('id',CU.id).single();
+        if(pd){
+          if(pd.is_suspended&&!CP.is_suspended){
+            CP.is_suspended=true;CP.suspension_reason=pd.suspension_reason;
+            const blkEl=document.getElementById('blk');
+            const blkMsg=document.getElementById('blk-msg');
+            if(blkEl){blkEl.classList.add('on');if(blkMsg)blkMsg.textContent=pd.suspension_reason||'계정이 정지되었습니다.';}
+          } else if(!pd.is_suspended&&CP.is_suspended){
+            CP.is_suspended=false;
+            document.getElementById('blk')?.classList.remove('on');
+          }
+          // 잔액 최신화 (선생님 제외)
+          if(CP.role==='student'&&pd.balance!=null){CP.balance=pd.balance;syncBal();}
+        }
+      }catch(_){}
+    },30000);
   }
 }
 
@@ -2590,7 +2662,10 @@ function goPage(id){
 =========================================== */
 async function loadDash(){
   if(!CP)return;
-  await loadDSTU();
+  // 선생님/관리자는 학생 목록 먼저 로드 (정확한 초기값 표시)
+  if(CP.role==='teacher'||CP.role==='dev'||CP.role==='superadmin'){
+    await loadDSTU();
+  }
   document.getElementById('dash-greet').textContent=`안녕하세요, ${CP.name||'사용자'}님 👋`;
   const p=CP;
   if(p.role==='student'){
@@ -2630,21 +2705,23 @@ async function loadDash(){
   }else{
     document.getElementById('dash-stats').innerHTML=`<div class="stat"><div class="stat-l">총 학급</div><div class="stat-v" id="d-cls">-</div></div><div class="stat"><div class="stat-l">총 유저</div><div class="stat-v" id="d-usr">-</div></div><div class="stat"><div class="stat-l">플러그인</div><div class="stat-v" id="d-plg">-</div></div><div class="stat"><div class="stat-l" style="color:var(--red)">정지 유저</div><div class="stat-v dd" id="d-sus">-</div></div>`;
   }
-  // 비동기로 SB에서 실제 데이터 로드
-  if(SB&&CU&&CP?.class_id&&CP?.id!=='demo'){
+  // 비동기로 SB에서 실제 데이터 로드 (teacher stats)
+  if(SB&&CU&&CP?.class_id&&CP?.id!=='demo'&&!CP?._isGuest){
     SB.from('profiles').select('id,name,balance,credit_grade,is_suspended,role').eq('class_id',CP.class_id).then(({data})=>{
       if(!data)return;
       const stus=data.filter(s=>s.role==='student');
       const el=document.getElementById('s-cnt');
-      if(el)el.textContent=stus.length+' 명';
+      if(el)el.innerHTML=stus.length+'<span style="font-size:12px;color:#94a3b8;font-weight:500"> 명</span>';
       const cc=document.getElementById('c-cnt');
       if(cc)cc.textContent=stus.reduce((a,s)=>a+(s.balance||0),0).toLocaleString();
       const rc=document.getElementById('r-cnt');
       if(rc)rc.textContent=stus.filter(s=>s.credit_grade==='D').length;
-    }).then(()=>{},()=>{});
-    // quests는 로컬 데이터 사용
-    const qEl=document.getElementById('q-cnt');
-    if(qEl)qEl.textContent=(questData?.length||DQUESTS?.filter(q=>q.status==='active'||!q.status).length||0);
+    }).catch(()=>{});
+    // quests DB에서 로드
+    SB.from('quests').select('id',{count:'exact',head:true}).eq('class_id',CP.class_id).eq('is_active',true).then(({count})=>{
+      const qEl=document.getElementById('q-cnt');
+      if(qEl&&count!=null)qEl.innerHTML=count+(questApprovals?.length>0?`<span style="font-size:11px;background:#fef3c7;color:#b45309;border-radius:99px;padding:1px 6px;margin-left:6px">대기 ${questApprovals.length}</span>`:'');
+    }).catch(()=>{});
   }
   document.getElementById('dash-acts').innerHTML=p.role==='teacher'?`
     <button class="btn btn-g btn-sm" onclick="admTab('students',null);goPage('pg-admin')">
@@ -2712,14 +2789,34 @@ function renderFeed(){
 }
 
 function renderNotices(){
-  const items=window._notices?.length?window._notices.map(n=>({t:n.t,b:n.b,d:n.d,lvl:n.lvl})):[
+  // 항상 DB에서 최신 공지 로드 (학생/선생님 모두)
+  if(SB&&CU&&CP?.class_id&&CP?.id!=='demo'&&!CP?._isGuest){
+    SB.from('notices').select('id,title,content,created_at').eq('class_id',CP.class_id).order('created_at',{ascending:false}).limit(20)
+      .then(({data})=>{
+        if(data&&data.length){
+          window._notices=data.map(n=>({id:n.id,t:n.title,b:n.content||'',d:new Date(n.created_at).toLocaleDateString('ko-KR'),lvl:'normal'}));
+        } else {
+          window._notices=[];
+        }
+        window._notices._loaded=CP.class_id;
+        _renderNoticesUI();
+      }).catch(()=>{ _renderNoticesUI(); });
+    const el=document.getElementById('notices');
+    if(el&&(!window._notices||!window._notices.length))el.innerHTML='<div style="color:#94a3b8;font-size:12px;padding:10px;text-align:center">공지 불러오는 중...</div>';
+    return;
+  }
+  _renderNoticesUI();
+}
+function _renderNoticesUI(){
+  const items=window._notices?.length?window._notices.map(n=>({t:n.t,b:n.b,d:n.d,lvl:n.lvl||'normal'})):(CP?.id!=='demo'&&!CP?._isGuest?[]:[
     {t:'이번 주 IT 주식 강세',b:'GAMER, TECH 종목 주목!',d:'2시간 전',lvl:'normal'},
     {t:'새 퀘스트 등록',b:'독서 퀘스트가 추가되었어요',d:'1일 전',lvl:'normal'}
-  ];
+  ]);
   const lvlColors={normal:'#eef2f8',important:'#fef3c7',urgent:'#fee2e2'};
   const lvlBorder={normal:'#e2e8f0',important:'#fcd34d',urgent:'#fca5a5'};
   const el=document.getElementById('notices');
   if(!el)return;
+  if(!items.length){el.innerHTML='<div style="color:#94a3b8;font-size:12px;padding:10px;text-align:center">공지가 없어요</div>';return;}
   el.innerHTML=items.slice(0,5).map(n=>`<div style="background:${lvlColors[n.lvl||'normal']};border:1.5px solid ${lvlBorder[n.lvl||'normal']};border-radius:12px;padding:11px 14px;margin-bottom:8px">
     <div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:3px">${escHtml(n.t)}</div>
     <div style="font-size:12px;color:#64748b;line-height:1.5">${escHtml(n.b||'')}</div>
@@ -2989,10 +3086,13 @@ function renderStocksTab(el){
   <div class="tw" id="stocks-wrap" style="margin-bottom:16px">
     <div class="tw-hdr">
       <div class="tw-title">📈 실시간 주식 시장</div>
-      <button class="btn btn-g btn-xs" onclick="refreshStocks()" style="margin-left:auto">
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 6a5 5 0 119.5 2.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M10 1v3.5H6.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        새로고침
-      </button>
+      <div style="display:flex;align-items:center;gap:6px;margin-left:auto">
+        ${(CP?.role==='teacher'||CP?.role==='dev'||CP?.role==='superadmin')?`<button class="btn btn-p btn-xs" onclick="openAddStockModal()" style="display:flex;align-items:center;gap:4px"><svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/></svg>주식 추가</button>`:''}
+        <button id="stocks-refresh-btn" class="btn btn-g btn-xs" onclick="refreshStocks()" style="display:flex;align-items:center;gap:4px;min-width:76px">
+          <svg width="13" height="13" viewBox="0 0 12 12" fill="none" style="flex-shrink:0"><path d="M1 6a5 5 0 119.5 2.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M10 1v3.5H6.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          새로고침
+        </button>
+      </div>
     </div>
     <div id="stocks-inner">로딩 중...</div>
   </div>
@@ -3123,15 +3223,17 @@ async function renderEconRankTab(el){
   // Supabase에서 학급 학생만 로드
   if(SB&&CU&&CP?.class_id&&CP?.id!=='demo'&&!CP?._isGuest){
     try{
-      const{data}=await SB.from('profiles')
+      const{data,error}=await SB.from('profiles')
         .select('id,name,balance,credit_grade,job,is_suspended')
         .eq('class_id',CP.class_id)
-        .eq('role','student')
-        .neq('is_suspended',true);
+        .eq('role','student');
+      if(error)throw error;
       if(data&&data.length){
-        all=data.map(s=>({nm:s.name||'학생',bal:s.balance||0,gr:s.credit_grade||'C',job:s.job||'학생',isMe:s.id===CU?.id}));
+        all=data
+          .filter(s=>!s.is_suspended)
+          .map(s=>({nm:s.name||'학생',bal:s.balance||0,gr:s.credit_grade||'C',job:s.job||'학생',isMe:s.id===CU?.id}));
       }
-    }catch(_){}
+    }catch(e){console.warn('[rank]',e);}
   }
   if(!all.length){
     const stuOnly=DSTU.filter(s=>!s.sus&&(!s.role||s.role==='student'));
@@ -3360,13 +3462,69 @@ function initStocks(){
 }
 function renderStocks(){
   const isReal=stockIsReal;
+  const isTeacher=CP?.role==='teacher'||CP?.role==='dev'||CP?.role==='superadmin';
   const _sw=document.getElementById('stocks-inner')||document.getElementById('stocks-wrap');if(!_sw)return;_sw.innerHTML=`
     ${isReal?`<div style="padding:8px 13px 4px;display:flex;align-items:center;gap:6px"><div class="stk-live-badge"><div class="stk-live-dot"></div>실시간</div><span style="font-size:11px;color:var(--text4)">Yahoo Finance</span></div>`:''}
     ${stockData.map(s=>{
       const prFmt=s.currency==='KRW'?(s.pr||0).toLocaleString('ko-KR')+'원':((s.pr||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}))+'$';
-      return `<div class="stk-row" onclick="openStockModal('${s.tk}')"><div class="stk-tick">${s.tk.replace('.KS','').replace('.KQ','')}</div><div class="stk-name">${s.nm}</div><div class="stk-price">${prFmt}</div><div class="stk-chg ${s.ch>=0?'cup':'cdn'}">${s.ch>=0?'▲':'▼'}${Math.abs(s.ch)}%</div></div>`;
+      return `<div class="stk-row" style="display:flex;align-items:center;gap:10px;padding:11px 16px;border-top:1px solid #f1f5f9;cursor:pointer;transition:background .12s" onmouseover="this.style.background='#f8faff'" onmouseout="this.style.background=''">
+        <div onclick="openStockModal('${s.tk}')" style="display:flex;align-items:center;gap:10px;flex:1;min-width:0">
+          <div class="stk-tick">${s.tk.replace('.KS','').replace('.KQ','')}</div>
+          <div class="stk-name">${s.nm}</div>
+          <div class="stk-price">${prFmt}</div>
+          <div class="stk-chg ${s.ch>=0?'cup':'cdn'}">${s.ch>=0?'▲':'▼'}${Math.abs(s.ch)}%</div>
+        </div>
+        ${isTeacher?`<button onclick="event.stopPropagation();deleteStock('${s.tk}')" class="btn btn-r btn-xs" style="flex-shrink:0;padding:3px 8px;font-size:11px">삭제</button>`:''}
+      </div>`;
     }).join('')}
     ${isReal?`<div class="stk-src-note">※ 데이터: Yahoo Finance / 교육용 참고 목적</div>`:'<div class="stk-src-note">※ 실시간 연결 실패 시 시뮬레이션 데이터</div>'}`;
+}
+
+async function deleteStock(tk){
+  if(!confirm(`${tk} 주식을 삭제할까요?`))return;
+  stockData=stockData.filter(s=>s.tk!==tk);
+  renderStocks();
+  if(SB&&CP?.id!=='demo'&&!CP?._isGuest){
+    sbSave(SB.from('stocks').delete().eq('ticker',tk.replace('.KS','').replace('.KQ','')),'주식 삭제');
+  }
+  toast(`${tk} 삭제됨`,'i');
+}
+
+function openAddStockModal(){
+  const mid='md-add-stock';document.getElementById(mid)?.remove();
+  document.body.insertAdjacentHTML('beforeend',`
+  <div class="ov on" id="${mid}">
+    <div class="modal" style="width:min(420px,94vw)">
+      <div class="mhdr"><div class="mtitle">📈 주식 추가</div><button class="mclose" onclick="closeMod('${mid}')"><svg viewBox="0 0 9 9" fill="none" width="9" height="9"><path d="M1 1l7 7M8 1L1 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button></div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div class="fg"><label class="fl">종목 코드 (티커) *</label><input class="fi" id="as-ticker" placeholder="예: AAPL, 005930"></div>
+        <div class="fg"><label class="fl">종목명 *</label><input class="fi" id="as-sname" placeholder="예: 애플, 삼성전자"></div>
+        <div class="fg"><label class="fl">시작 가격 *</label><input class="fi" id="as-price" type="number" min="1" placeholder="예: 1000"></div>
+        <div class="fg"><label class="fl">등락률 (%)</label><input class="fi" id="as-chg" type="number" step="0.01" placeholder="예: 1.5 또는 -2.3" value="0"></div>
+      </div>
+      <div class="mfoot">
+        <button class="btn btn-g" onclick="closeMod('${mid}')">취소</button>
+        <button class="btn btn-p" onclick="confirmAddStock()">추가</button>
+      </div>
+    </div>
+  </div>`);
+}
+
+async function confirmAddStock(){
+  const tk=(document.getElementById('as-ticker')?.value||'').trim().toUpperCase();
+  const nm=(document.getElementById('as-sname')?.value||'').trim();
+  const pr=parseFloat(document.getElementById('as-price')?.value||0);
+  const ch=parseFloat(document.getElementById('as-chg')?.value||0);
+  if(!tk||!nm||!pr){toast('종목코드, 이름, 가격을 입력하세요','e');return;}
+  if(stockData.find(s=>s.tk===tk)){toast('이미 있는 종목이에요','e');return;}
+  const newStock={tk,nm,pr,ch,currency:tk.includes('0')?'KRW':'USD'};
+  stockData.push(newStock);
+  renderStocks();
+  closeMod('md-add-stock');
+  toast(`${nm}(${tk}) 추가됨 📈`,'s');
+  if(SB&&CP?.id!=='demo'&&!CP?._isGuest){
+    sbSave(SB.from('stocks').upsert({ticker:tk,name:nm,price:pr,change_pct:ch,updated_at:new Date().toISOString()},{onConflict:'ticker'}),'주식 추가');
+  }
 }
 async function renderTx(){
   const wrap=document.getElementById('tx-wrap');
@@ -3391,12 +3549,12 @@ async function renderTx(){
   wrap.innerHTML='<div style="color:#94a3b8;font-size:13px;padding:12px;text-align:center">거래내역이 없어요</div>';
 }
 async function refreshStocks(){
-  const btn=document.querySelector('#stocks-wrap [onclick="refreshStocks()"]');
-  if(btn){btn.disabled=true;btn.innerHTML='<svg width="12" height="12" viewBox="0 0 12 12" fill="none" style="animation:spin .8s linear infinite;vertical-align:middle"><path d="M1 6a5 5 0 119.5 2.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M10 1v3.5H6.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg> 로딩중...';}
+  const btn=document.getElementById('stocks-refresh-btn');
+  if(btn){btn.disabled=true;btn.innerHTML='<svg width="13" height="13" viewBox="0 0 12 12" fill="none" style="animation:spin .8s linear infinite;flex-shrink:0"><path d="M1 6a5 5 0 119.5 2.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M10 1v3.5H6.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>&nbsp;로딩중...';}
   const ok=await fetchRealStocks();
   renderStocks();
   toast(ok?'실시간 주가 업데이트 완료 📈':'시뮬레이션 데이터로 갱신','i');
-  if(btn){btn.disabled=false;btn.innerHTML='<svg width="12" height="12" viewBox="0 0 12 12" fill="none" style="vertical-align:middle"><path d="M1 6a5 5 0 119.5 2.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M10 1v3.5H6.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg> 새로고침';}
+  if(btn){btn.disabled=false;btn.innerHTML='<svg width="13" height="13" viewBox="0 0 12 12" fill="none" style="flex-shrink:0"><path d="M1 6a5 5 0 119.5 2.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M10 1v3.5H6.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>&nbsp;새로고침';}
 }
 function openStockMod(tk){ openStockModal(tk); }
 function stTotal(){
@@ -3407,23 +3565,34 @@ function stTotal(){
   if(costEl)costEl.textContent=(prCC*q).toLocaleString()+' CC';
 }
 async function doStock(type){
-  const q=parseInt(document.getElementById('stock-qty')?.value)||1;if(!curStock)return;
+  const DB_INT_MAX=2147483647;
+  let q=parseInt(document.getElementById('stock-qty')?.value)||1;
+  if(q<1)q=1;
+  if(q>1000000)q=1000000; // 수량 최대 100만주 제한
+  if(!curStock)return;
   // 파산 제한: 매수만 차단 (매도는 허용 — 자산 처분해서 빚 갚기)
   if(type==='buy'&&checkBankruptBlock('주식 매수'))return;
-  const prCC=curStock._prCC||Math.round((curStock.pr||0)/100);
-  const total=prCC*q;
+  const prCC=Math.max(0,Math.min(DB_INT_MAX,curStock._prCC||Math.round((curStock.pr||0)/100)));
+  const rawTotal=prCC*q;
+  const total=Math.min(DB_INT_MAX,rawTotal); // integer 범위 초과 방지
   if(type==='buy'){
     if((CP.balance||0)<total){toast('코인 부족','e');return;}
-    CP.balance-=total;
+    CP.balance=Math.max(-DB_INT_MAX,Math.min(DB_INT_MAX,CP.balance-total));
     // 보유 주식 업데이트
     const ex=CP.inventory.find(i=>i.id==='stk_'+curStock.tk);
-    if(ex){ex.qty=(ex.qty||0)+q;ex.avgPr=Math.round(((ex.avgPr||prCC)*(ex.qty-q)+prCC*q)/ex.qty);}
-    else CP.inventory.push({id:'stk_'+curStock.tk,nm:curStock.nm,type:'stock',tk:curStock.tk,qty:q,avgPr:prCC});
+    if(ex){
+      const prevQty=ex.qty||0;
+      const newQtyEx=prevQty+q;
+      ex.qty=newQtyEx;
+      ex.avgPr=Math.min(DB_INT_MAX,Math.round(((ex.avgPr||prCC)*prevQty+prCC*q)/newQtyEx));
+    } else {
+      CP.inventory.push({id:'stk_'+curStock.tk,nm:curStock.nm,type:'stock',tk:curStock.tk,qty:q,avgPr:Math.min(DB_INT_MAX,prCC)});
+    }
     toast(`${curStock.nm} ${q}주 매수! -${total.toLocaleString()} CC`,'s');
   } else {
     const holding=CP.inventory.find(i=>i.id==='stk_'+curStock.tk);
     if(!holding||holding.qty<q){toast('보유 주식 부족','e');return;}
-    CP.balance+=total;
+    CP.balance=Math.max(-DB_INT_MAX,Math.min(DB_INT_MAX,CP.balance+total));
     holding.qty-=q;
     if(holding.qty<=0) CP.inventory=CP.inventory.filter(i=>i.id!=='stk_'+curStock.tk);
     toast(`${curStock.nm} ${q}주 매도! +${total.toLocaleString()} CC`,'s');
@@ -3431,10 +3600,11 @@ async function doStock(type){
   syncBal();closeMod('md-stock');
   if(SB&&CU&&CP?.class_id&&CP?.id!=='demo'){
     await sbSave(SB.from('profiles').update({balance:CP.balance,inventory:CP.inventory}).eq('id',CU.id),'잔액/인벤 저장');
-    sbSave(SB.from('transactions').insert({from_id:CU.id,to_id:CU.id,amount:type==='buy'?-total:total,type:type==='buy'?'stock_buy':'stock_sell',description:`${curStock.nm} ${q}주 ${type==='buy'?'매수':'매도'}`,class_id:CP.class_id}),'기록 저장');
+    const txAmt=Math.max(-DB_INT_MAX,Math.min(DB_INT_MAX,type==='buy'?-total:total));
+    sbSave(SB.from('transactions').insert({from_id:CU.id,to_id:CU.id,amount:txAmt,type:type==='buy'?'stock_buy':'stock_sell',description:`${curStock.nm} ${q}주 ${type==='buy'?'매수':'매도'}`,class_id:CP.class_id}),'기록 저장');
     const holding=CP.inventory.find(i=>i.id==='stk_'+curStock.tk);
     const newQty=holding?holding.qty:0;
-    const avgPrFinal=holding?holding.avgPr:prCC;
+    const avgPrFinal=holding?Math.min(DB_INT_MAX,holding.avgPr):Math.min(DB_INT_MAX,prCC);
     sbSave(SB.from('stock_holdings').upsert({user_id:CU.id,ticker:curStock.tk,quantity:newQty,avg_price:avgPrFinal},{onConflict:'user_id,ticker'}),'주식 보유 저장');
   }
 }
@@ -3928,10 +4098,14 @@ async function approveJobApp(stuId){
   const jobNm=s.pendingJob;
   const allJ=getAllJobs();
   const j=allJ.find(x=>x.nm===jobNm);
-  s.job=jobNm; s.job_salary=j?.sal||0; delete s.pendingJob;
+  s.job=jobNm; s.job_salary=j?.sal||0; s.perms=j?.perms||[]; delete s.pendingJob;
   toast(`✅ ${s.nm}의 직업 "${jobNm}" 승인됨`,'s');
   if(SB&&s.id&&!s.id.startsWith('s')){
-    await sbSave(SB.from('profiles').update({job:jobNm,job_salary:j?.sal||0,pending_job:null}).eq('id',stuId),'직업 승인 저장');
+    await sbSave(SB.from('profiles').update({
+      job:jobNm,
+      job_salary:j?.sal||0,
+      pending_job:null
+    }).eq('id',stuId),'직업 승인 저장');
   }
   // 배지 업데이트 및 탭 새로고침
   const pendingCount=DSTU.filter(x=>x.pendingJob).length;
@@ -4061,7 +4235,10 @@ async function admTab(tab,btn){
                 <button class="btn btn-g btn-xs" onclick="admEditStu(${i})" style="flex:1">편집</button>
                 <button class="btn btn-r btn-xs" onclick="admSuspend(${i})">⊘</button>
               </div>
-              <button class="btn btn-g btn-xs" onclick="admManageItems(${i})" style="width:100%;font-size:11px">🎒 아이템 관리</button>
+              <div style="display:flex;gap:5px">
+                <button class="btn btn-g btn-xs" onclick="admManageItems(${i})" style="flex:1;font-size:11px">🎒 아이템</button>
+                <button class="btn btn-p btn-xs" onclick="admAssignJob(${i})" style="flex:1;font-size:11px">💼 직업</button>
+              </div>
             </div>`;
           }).join('')}
           </div>`
@@ -4081,6 +4258,7 @@ async function admTab(tab,btn){
                 <button class="btn btn-g btn-xs" onclick="admEditStu(${i})">편집</button>
                 <button class="btn btn-r btn-xs" onclick="admSuspend(${i})">${s.sus?'해제':'정지'}</button>
                 <button class="btn btn-g btn-xs" onclick="admManageItems(${i})">🎒</button>
+                <button class="btn btn-p btn-xs" onclick="admAssignJob(${i})">💼직업</button>
               </div></td>
             </tr>`).join('')}
             </tbody>
@@ -4593,6 +4771,54 @@ function admClearAllItems(stuIdx){
   }
   document.getElementById('md-stu-items')?.remove();
 }
+
+function admAssignJob(idx){
+  const s=DSTU[idx];if(!s)return;
+  const allJobs=getAllJobs();
+  const mid='md-assign-job';document.getElementById(mid)?.remove();
+  document.body.insertAdjacentHTML('beforeend',`
+  <div class="ov on" id="${mid}">
+    <div class="modal" style="width:min(440px,94vw)">
+      <div class="mhdr">
+        <div class="mtitle">💼 ${escHtml(s.nm)} 직업 부여</div>
+        <button class="mclose" onclick="closeMod('${mid}')"><svg viewBox="0 0 9 9" fill="none" width="9" height="9"><path d="M1 1l7 7M8 1L1 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px;max-height:400px;overflow-y:auto">
+        <div onclick="confirmAssignJob(${idx},'학생',0)" style="padding:10px 14px;border:1.5px solid ${s.job==='학생'?'#3b82f6':'#eef2f8'};border-radius:12px;cursor:pointer;transition:.15s;background:${s.job==='학생'?'#eff6ff':'#fff'}" onmouseover="this.style.borderColor='#3b82f6'" onmouseout="this.style.borderColor='${s.job==='학생'?'#3b82f6':'#eef2f8'}'>
+          <div style="font-weight:700;color:#0f172a">🙋 학생 (기본)</div>
+          <div style="font-size:12px;color:#64748b;margin-top:2px">주급 0 CC</div>
+        </div>
+        ${allJobs.map(j=>`
+        <div onclick="confirmAssignJob(${idx},'${j.nm||j.name||j.nm}',${j.sal||j.salary||0})" style="padding:10px 14px;border:1.5px solid ${s.job===(j.nm||j.name)?'#3b82f6':'#eef2f8'};border-radius:12px;cursor:pointer;transition:.15s;background:${s.job===(j.nm||j.name)?'#eff6ff':'#fff'}" onmouseover="this.style.borderColor='#3b82f6'" onmouseout="this.style.borderColor='${s.job===(j.nm||j.name)?'#3b82f6':'#eef2f8'}'>
+          <div style="display:flex;align-items:center;gap:8px">
+            <div style="font-weight:700;color:#0f172a">${escHtml(j.nm||j.name||'직업')}</div>
+            <span class="chip chip-b" style="font-size:10px">주급 ${(j.sal||j.salary||0).toLocaleString()} CC</span>
+          </div>
+          <div style="font-size:12px;color:#64748b;margin-top:2px">${escHtml(j.desc||j.description||'')}</div>
+        </div>`).join('')}
+      </div>
+      <div class="mfoot">
+        <button class="btn btn-g" onclick="closeMod('${mid}')">취소</button>
+      </div>
+    </div>
+  </div>`);
+}
+
+async function confirmAssignJob(idx,jobName,salary){
+  const s=DSTU[idx];if(!s)return;
+  s.job=jobName;s.job_salary=salary;
+  closeMod('md-assign-job');
+  toast(`${s.nm}의 직업: ${jobName} (주급 ${salary.toLocaleString()} CC)`,'s');
+  if(SB&&s.id&&!s.id.startsWith('s')&&CP?.id!=='demo'&&!CP?._isGuest){
+    await sbSave(SB.from('profiles').update({job:jobName,job_salary:salary}).eq('id',s.id),'직업 부여 저장');
+    // 직업 신청 상태가 있으면 승인처리
+    try{
+      await SB.from('job_applications').update({status:'approved',approved_by:CU?.id})
+        .eq('user_id',s.id).eq('status','pending');
+    }catch(_){}
+  }
+  admTab('students',null);
+}
 async function addDSTU(){
   // 실제 Supabase 계정이 있으면 이메일+비번 모달, 없으면 이름만 로컬 추가
   if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest&&CP?.class_id){
@@ -4709,19 +4935,39 @@ async function submitAddStudent(){
     if(btn){btn.disabled=false;btn.textContent='등록';}
   }
 }
-function bulkRewardDSTU(){
-  const amt=parseInt(prompt('전체 학생에게 지급할 코인 (음수=회수):')||0);
-  if(!amt)return;
-  DSTU.forEach(s=>{s.bal=Math.max(0,s.bal+amt);});
-  toast(`전체 ${DSTU.length}명에게 ${amt>0?'+':''}${amt} CC!`,'s');
-  if(SB&&CU&&CP?.id!=='demo'){
-    DSTU.forEach(s=>{
-      if(s.id&&!s.id.startsWith('s')){
-        sbSave(SB.from('profiles').update({balance:s.bal}).eq('id',s.id),'지급 저장');
-        SB.from('transactions').insert({from_id:CU.id,to_id:s.id,amount:amt,type:'reward',description:`전체 지급 (${CP?.name||'선생님'})`,class_id:CP?.class_id}).then(()=>{},()=>{});
+async function bulkRewardDSTU(){
+  const rawAmt=parseInt(prompt('전체 학생에게 지급할 코인 (음수=회수):')||0);
+  if(!rawAmt)return;
+  // integer overflow 방지 (-2억 ~ 2억 범위 제한, DB integer max는 약 21억)
+  const amt=Math.max(-2000000000,Math.min(2000000000,rawAmt));
+  if(rawAmt!==amt){toast('⚠️ 금액이 너무 커서 제한됩니다','w');}
+  const reason=`전체 지급 (${CP?.name||'선생님'})`;
+  if(SB&&CU&&CP?.class_id&&CP?.id!=='demo'&&!CP?._isGuest){
+    try{
+      const{data:stuRows}=await SB.from('profiles').select('id,balance,role').eq('class_id',CP.class_id).eq('role','student').neq('is_suspended',true);
+      if(stuRows&&stuRows.length){
+        let cnt=0;
+        for(const s of stuRows){
+          // 학생만 처리 (teacher/dev/superadmin role 건너뜀)
+          if(s.role!=='student')continue;
+          const curBal=s.balance||0;
+          // DB integer 범위 안전하게 계산 (-2,000,000,000 ~ 2,000,000,000)
+          const newBal=Math.max(-2000000000,Math.min(2000000000,curBal+amt));
+          await SB.from('profiles').update({balance:newBal}).eq('id',s.id);
+          SB.from('transactions').insert({from_id:CU.id,to_id:s.id,amount:amt,type:'reward',description:reason,class_id:CP.class_id}).then(()=>{},()=>{});
+          const dstu=DSTU.find(x=>x.id===s.id);
+          if(dstu)dstu.bal=newBal;
+          cnt++;
+        }
+        toast(`✅ ${cnt}명에게 ${amt>0?'+':''}${amt.toLocaleString()} CC 지급 완료!`,'s');
+        admTab('students',null);
+        return;
       }
-    });
+    }catch(e){console.error('[bulkReward]',e);}
   }
+  // 로컬 DSTU 폴백
+  DSTU.filter(s=>s.role==='student'||!s.role).forEach(s=>{s.bal=Math.max(0,Math.min(2000000000,s.bal+amt));});
+  toast(`전체 ${DSTU.length}명에게 ${amt>0?'+':''}${amt.toLocaleString()} CC!`,'s');
   admTab('students',null);
 }
 function filterStudentAdmin(v){
@@ -4736,20 +4982,23 @@ function openTransfer(toName){
 }
 function openReward(id,nm){document.getElementById('rw-id').value=id;document.getElementById('rw-nm').textContent=nm;openMod('md-reward');}
 async function doReward(){
-  const amt=parseInt(document.getElementById('rw-amt').value);
+  const DB_INT_MAX=2147483647;
+  const rawAmt=parseInt(document.getElementById('rw-amt').value);
+  const amt=Math.max(-DB_INT_MAX,Math.min(DB_INT_MAX,rawAmt||0));
+  if(!amt){toast('금액을 입력하세요','e');return;}
   const nm=document.getElementById('rw-nm').textContent;
   const id=document.getElementById('rw-id').value;
   const reason=document.getElementById('rw-reason')?.value?.trim()||`관리자 지급 (${CP?.name||'선생님'})`;
-  if(!amt){toast('금액을 입력하세요','e');return;}
   const s=DSTU.find(s=>s.id===id);
-  if(s)s.bal=Math.max(0,s.bal+amt);
+  if(s)s.bal=Math.max(-DB_INT_MAX,Math.min(DB_INT_MAX,s.bal+amt));
   toast(`${nm}에게 ${amt>=0?'+':''}${amt.toLocaleString()} CC 지급`,'s');
   closeMod('md-reward');
   if(SB&&CU&&id&&!id.startsWith('s')&&CP?.id!=='demo'){
     let _balRes={data:null};try{_balRes=await SB.from('profiles').select('balance').eq('id',id).single();}catch(_){}
     const{data}=_balRes;
     if(data!==null){
-      await sbSave(SB.from('profiles').update({balance:Math.max(0,(data.balance||0)+amt)}).eq('id',id),'특별 보상 저장');
+      const newBal=Math.max(-DB_INT_MAX,Math.min(DB_INT_MAX,(data.balance||0)+amt));
+      await sbSave(SB.from('profiles').update({balance:newBal}).eq('id',id),'특별 보상 저장');
       sbSave(SB.from('transactions').insert({from_id:CU.id,to_id:id,amount:amt,type:'reward',description:reason,class_id:CP?.class_id}),'기록 저장');
     }
   }
@@ -4817,16 +5066,26 @@ async function addItem(){
   const s=parseInt(document.getElementById('ai-s').value)||-1;
   const cat=document.getElementById('ai-cat')?.value||'기타';
   if(!nm){toast('상품명 입력','e');return;}
-  const newId=Date.now();
-  shopItems.push({id:newId,nm,desc:d,pr:p,st:s,cat,ico:'📦'});
   closeMod('md-additem');
   toast('상품 추가','s');
   if(SB&&CU&&CP?.class_id&&CP?.id!=='demo'){
-    sbSave(SB.from('shop_items').insert({
-      class_id:CP.class_id,name:nm,description:d,
-      price:p,stock:s,category:cat,emoji:'📦',
-      is_active:true,created_by:CU.id
-    }),'상점 저장');
+    try{
+      const{data:ins,error:insErr}=await SB.from('shop_items').insert({
+        class_id:CP.class_id,name:nm,description:d,
+        price:p,stock:s,category:cat,emoji:'📦',
+        is_active:true,created_by:CU.id
+      }).select().single();
+      if(insErr)throw insErr;
+      if(ins) shopItems.push({id:ins.id,nm:ins.name,desc:ins.description||'',cat:ins.category||'기타',pr:ins.price||100,st:ins.stock??-1,ico:ins.emoji||'📦',emoji:ins.emoji||'📦'});
+    }catch(e){
+      // DB 저장 실패 시 임시 로컬 id 사용
+      const tmpId='tmp_'+Date.now();
+      shopItems.push({id:tmpId,nm,desc:d,pr:p,st:s,cat,ico:'📦'});
+      toast('⚠️ 상점 저장 실패: '+e.message,'e');
+    }
+  } else {
+    const tmpId='tmp_'+Date.now();
+    shopItems.push({id:tmpId,nm,desc:d,pr:p,st:s,cat,ico:'📦'});
   }
   admTab('shop',null);
 }
@@ -4865,14 +5124,18 @@ async function addNotice(){
   if(!window._notices)window._notices=[];
   const now=new Date().toLocaleDateString('ko-KR',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
   window._notices.unshift({id:Date.now(),t,b:b||'',d:now,lvl});
+  // 캐시 무효화 → 다음 renderNotices 호출 시 DB에서 재로드
+  if(window._notices)window._notices._loaded=null;
   renderNotices();
   toast('공지 등록! 📢','s');
   if(SB&&CU&&CP?.class_id){
     try{
-      await SB.from('notices').insert({
+      const{data:nd}=await SB.from('notices').insert({
         title:t,content:b||'',class_id:CP.class_id,
         created_by:CU.id,is_global:false
-      });
+      }).select().single();
+      // DB 저장 후 캐시 무효화하여 최신 데이터 표시
+      if(window._notices)window._notices._loaded=null;
     }catch(_){}
   }
   admTab('notice',null);
@@ -5107,6 +5370,20 @@ const SAMPLE_MEALS={
   fri:{date:'금요일',cal:891,menu:['쌀밥','감자탕','돈까스','브로콜리','깍두기','바나나']},
 };
 function loadMeal(force){
+  // 학급 settings에서 학교 코드 로드 (학생 포함 전체 공유)
+  if(SB&&CP?.class_id&&CP?.id!=='demo'&&!CP?._isGuest&&(!window._niceSchoolCode)){
+    SB.from('classes').select('settings').eq('id',CP.class_id).single()
+      .then(({data})=>{
+        if(data?.settings?.schoolCode&&data?.settings?.officeCode){
+          window._niceSchoolCode=data.settings.schoolCode;
+          window._niceOfficeCode=data.settings.officeCode;
+          CP.school_code=data.settings.schoolCode;
+          CP.office_code=data.settings.officeCode;
+          if(data.settings.schoolName&&!CP.school) CP.school=data.settings.schoolName;
+          loadMeal(force);
+        }
+      }).catch(()=>{});
+  }
   // localStorage에서도 재시도
   try{
     const sc=JSON.parse(localStorage.getItem('cw_school')||'null');
@@ -5294,6 +5571,10 @@ function selectSchool(officeCode,schoolCode,schoolName){
       office_code:officeCode,
       school_code:schoolCode
     }).eq('id',CU.id),'학교 정보 저장');
+    // 학급 settings에도 저장 → 학급 전체 학생이 공유
+    if(CP?.class_id&&CP?.id!=='demo'&&!CP?._isGuest){
+      mergeClassSettings({schoolCode,officeCode,schoolName});
+    }
   }
   toast(`🏫 ${schoolName} 선택됨! 급식·일정 불러오는 중...`,'s');
   // 모달 닫기
@@ -5307,6 +5588,9 @@ function selectSchool(officeCode,schoolCode,schoolName){
 }
 
 function openSchoolSearch(){
+  // 선생님만 설정 가능 (학생은 조회만)
+  const isTeacher=CP?.role==='teacher'||CP?.role==='dev'||CP?.role==='superadmin';
+  if(!isTeacher){toast('학교 설정은 선생님만 가능해요','e');return;}
   // 저장된 학교 불러오기
   try{const saved=JSON.parse(localStorage.getItem('cw_school')||'null');if(saved){window._niceOfficeCode=saved.officeCode;window._niceSchoolCode=saved.schoolCode;}}catch(_){}
   // 모달 없으면 생성
@@ -7106,7 +7390,7 @@ try{
 }catch(_){userPlugins=[];}
 try{
   const _inst=localStorage.getItem('cw_installed');
-  if(_inst&&_inst.trim()){installedSet=new Set(JSON.parse(_inst)||[]);}
+  if(_inst&&_inst.trim()){installedSet=new Set((JSON.parse(_inst)||[]).map(String));}
 }catch(_){installedSet=new Set();}
 // Supabase에서 플러그인 데이터 로드 (비동기, 앱 로드 후 호출됨)
 async function loadPluginsFromSB(){
@@ -7124,7 +7408,7 @@ async function loadPluginsFromSB(){
       try{localStorage.setItem('cw_user_plugins',JSON.stringify(userPlugins));}catch(_){}
     }
     if(data.installed_plugins&&Array.isArray(data.installed_plugins)&&data.installed_plugins.length){
-      installedSet=new Set(data.installed_plugins);
+      installedSet=new Set(data.installed_plugins.map(String));
       try{localStorage.setItem('cw_installed',JSON.stringify([...installedSet]));}catch(_){}
     }
   }catch(e){console.error('[loadPluginsFromSB]',e);}
@@ -7373,7 +7657,7 @@ function renderStore(list){
   ${list.length===0?`<div class="empty"><svg width="44" height="44" viewBox="0 0 44 44" fill="none"><circle cx="22" cy="22" r="20" stroke="currentColor" stroke-width="1.8"/><path d="M14 22h16M22 14v16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><div class="empty-t">검색 결과가 없어요</div><div class="empty-s">다른 키워드로 검색해보세요</div></div>`:`
   <div class="plg-grid">
   ${list.map(p=>{
-    const inst=installedSet.has(p.id);
+    const inst=installedSet.has(String(p.id));
     const isUser=!!p._user; // 사용자가 만든 플러그인
     const starsN=Math.round(p.stars||0);
     return `<div class="plg-card ${inst?'installed':''}">
@@ -7607,16 +7891,19 @@ function runPlugin(id){
 
 function toggleInstall(id){
   const all=getAllPlugins();
-  const p=all.find(p=>p.id===id);if(!p)return;
-  if(installedSet.has(id)){
-    installedSet.delete(id);
+  // id 타입 통일 (숫자/문자열 혼용 방지) — 항상 문자열로 처리
+  const pid=String(id);
+  const p=all.find(p=>String(p.id)===pid);if(!p){toast('플러그인을 찾을 수 없어요','e');return;}
+  // 이미 설치된 경우 제거
+  if(installedSet.has(pid)){
+    installedSet.delete(pid);
     toast(`${p.nm} 제거됨`,'i');
     savePluginStorage();
     const srch=document.getElementById('plg-srch');
     filterPlugins(srch?.value||'');
     return;
   }
-  // 코드 없는 플러그인 (메타데이터만 있는 공유 플러그인) 차단
+  // 코드 없는 플러그인 차단
   if(!p.code||typeof p.code!=='string'||!p.code.trim()){
     toast('이 플러그인은 코드가 없어 설치할 수 없어요','e');
     return;
@@ -7627,19 +7914,19 @@ function toggleInstall(id){
     console.error('[Plugin Install SyntaxError]',synErr);
     return;
   }
-  installedSet.add(id);p.dl=(p.dl||0)+1;
+  installedSet.add(pid);p.dl=(p.dl||0)+1;
   savePluginStorage();
-  toast(`✅ ${p.nm} 설치! 학급판 위젯 편집기에서 추가 가능`,'s');
-  savePluginStorage();
+  toast(`✅ ${p.nm} 설치 완료! 학급판 위젯 편집기에서 추가 가능해요`,'s');
   const srch=document.getElementById('plg-srch');
   filterPlugins(srch?.value||'');
 }
 function addPluginToBoard(id){
-  const p=getAllPlugins().find(p=>p.id===id);if(!p)return;
+  const p=getAllPlugins().find(p=>String(p.id)===String(id));if(!p)return;
   // 내장 플러그인은 typeMap, 사용자 플러그인은 'plugin' 타입 위젯으로 추가
-  const builtinTypeMap={1:'dice',2:'quiz',3:'poll',6:'notice',7:'lotto',8:'timer'};
-  const wtype=(typeof id==='number'&&builtinTypeMap[id])||'plugin';
-  if(!installedSet.has(id)){toggleInstall(id);}
+  const builtinTypeMap={'1':'dice','2':'quiz','3':'poll','6':'notice','7':'lotto','8':'timer'};
+  const sid=String(id);
+  const wtype=builtinTypeMap[sid]||'plugin';
+  if(!installedSet.has(sid)){toggleInstall(id);}
   goPage('pg-board');
   setTimeout(()=>{
     openBded();
@@ -7647,10 +7934,10 @@ function addPluginToBoard(id){
     // 사용자 플러그인이면 플러그인 id를 위젯에 저장
     if(wtype==='plugin'&&w){
       const bw=boardWidgets.find(bw=>bw.id===w);
-      if(bw){bw.pluginId=id;bw.pluginNm=p.nm;}
+      if(bw){bw.pluginId=sid;bw.pluginNm=p.nm;}
       const el=document.getElementById(w);
       if(el){
-        el.dataset.pluginId=id;
+        el.dataset.pluginId=sid;
         const titleEl=el.querySelector('.bw-title');
         if(titleEl)titleEl.textContent=p.nm.length>10?p.nm.slice(0,10)+'…':p.nm;
         const bodyEl=el.querySelector('.bw-body');
@@ -8127,9 +8414,9 @@ function openProfile(targetCP){
         <span class="chip ${roleColor}">${roleLabel}</span>
         ${p.job&&p.job!=='무직'?`<span class="chip chip-a">${p.job}</span>`:''}
       </div>
-      ${isMe?`<div style="display:flex;align-items:center;gap:6px;margin:6px 0 2px">
-        <textarea id="bio-input" class="fi" rows="2" style="resize:none;font-size:12.5px;padding:8px 10px" placeholder="소개를 입력하세요...">${escHtml(p.bio||'')}</textarea>
-        <button class="btn btn-p btn-sm" onclick="saveBio()" style="height:36px;padding:0 10px;flex-shrink:0">저장</button>
+      ${isMe?`<div style="display:flex;align-items:stretch;gap:8px;margin:8px 0 2px">
+        <textarea id="bio-input" class="fi" rows="3" style="resize:none;font-size:13px;padding:10px 12px;flex:1;min-height:76px;height:76px;line-height:1.5;box-sizing:border-box" placeholder="소개를 입력하세요...">${escHtml(p.bio||'')}</textarea>
+        <button class="btn btn-p" onclick="saveBio()" style="height:76px;min-height:76px;padding:0 16px;flex-shrink:0;white-space:nowrap;font-size:13px;align-self:stretch;box-sizing:border-box">저장</button>
       </div>`:`<div class="prof-bio">${escHtml(p.bio||'소개가 없어요 👋')}</div>`}
       <div class="prof-stats">
         <div class="prof-stat">
@@ -8223,6 +8510,14 @@ function toast(msg,type='i'){
 /* === RESTORED FUNCTIONS === */
 
 function syncCoin(){
+  const isTeacher=CP?.role==='teacher'||CP?.role==='dev'||CP?.role==='superadmin';
+  if(isTeacher){
+    CP.balance=99999999;
+    const v='∞';
+    const el=document.getElementById('coin-val');if(el)el.textContent=v;
+    ['shop-coin','bk-bal','sbv-coin'].forEach(id=>{const e=document.getElementById(id);if(e)e.textContent=v;});
+    return;
+  }
   const v=(CP.balance||0).toLocaleString();
   const el=document.getElementById('coin-val');
   if(el)el.textContent=v;
@@ -8233,6 +8528,8 @@ function syncCoin(){
 let _syncCoinTimer=null;    // 디바운스 타이머
 async function syncCoinDB(){
   if(CP?._isGuest||CP?.id==='demo'||!CU)return;
+  // 선생님/dev/superadmin은 DB 저장 안 함 (무한 잔고)
+  if(CP?.role==='teacher'||CP?.role==='dev'||CP?.role==='superadmin')return;
   clearTimeout(_syncCoinTimer);
   _syncCoinTimer=setTimeout(async()=>{
     _syncCoinWriting=true;
@@ -8536,20 +8833,24 @@ async function buyItem(id){
   const pr=item.pr||item.price||0;
   const st=item.st??item.stock??-1;
   const nm=item.nm||item.name||'아이템';
-  if((CP.balance||0)<pr){toast('코인 부족','e');return;}
+  const isTeacher=CP?.role==='teacher'||CP?.role==='dev'||CP?.role==='superadmin';
+  if(!isTeacher&&(CP.balance||0)<pr){toast('코인 부족','e');return;}
   if(st===0){toast('품절','e');return;}
-  CP.balance-=pr;
+  if(!isTeacher){CP.balance-=pr;}
   if(st>0){item.st=(item.st??item.stock)-1;item.stock=item.st;}
   const ex=CP.inventory.find(i=>i.id==='sh_'+id);
   if(ex)ex.qty=(ex.qty||1)+1;
   else CP.inventory.push({id:'sh_'+id,nm,cat:item.cat||item.category||'기타',ico:item.ico||item.emoji||'📦',qty:1});
   syncCoin();
-  toast(`${nm} 구매! -${pr.toLocaleString()} CC`,'s');
+  toast(`${nm} 구매! -${isTeacher?0:pr.toLocaleString()} CC`,'s');
   shopTab('items',null);
   if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest){
-    await sbSave(SB.from('profiles').update({balance:CP.balance,inventory:CP.inventory}).eq('id',CU.id),'잔액/인벤 저장');
-    if(st>0) sbSave(SB.from('shop_items').update({stock:item.st}).eq('id',String(id)),'상점 저장');
-    sbSave(SB.from('transactions').insert({from_id:CU.id,to_id:CU.id,amount:-pr,type:'purchase',description:nm+' 구매',class_id:CP.class_id||null}),'기록 저장');
+    if(!isTeacher) await sbSave(SB.from('profiles').update({balance:CP.balance,inventory:CP.inventory}).eq('id',CU.id),'잔액/인벤 저장');
+    else await sbSave(SB.from('profiles').update({inventory:CP.inventory}).eq('id',CU.id),'인벤 저장');
+    const UUID_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const isUUID=UUID_RE.test(String(id));
+    if(isUUID&&st>0) sbSave(SB.from('shop_items').update({stock:item.st}).eq('id',String(id)),'상점 저장');
+    if(!isTeacher) sbSave(SB.from('transactions').insert({from_id:CU.id,to_id:CU.id,amount:-pr,type:'purchase',description:nm+' 구매',class_id:CP.class_id||null}),'기록 저장');
   }
 }
 

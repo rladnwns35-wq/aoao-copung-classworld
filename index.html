@@ -3517,14 +3517,19 @@ async function confirmAddStock(){
   const ch=parseFloat(document.getElementById('as-chg')?.value||0);
   if(!tk||!nm||!pr){toast('종목코드, 이름, 가격을 입력하세요','e');return;}
   if(stockData.find(s=>s.tk===tk)){toast('이미 있는 종목이에요','e');return;}
-  const newStock={tk,nm,pr,ch,currency:tk.includes('0')?'KRW':'USD'};
+  const newStock={tk,nm,pr,ch,currency:tk.match(/^\d/)?'KRW':'USD'};
+  // Supabase 먼저 저장 후 로컬 반영
+  if(SB&&CP?.id!=='demo'&&!CP?._isGuest){
+    const ok=await sbSave(
+      SB.from('stocks').upsert({ticker:tk,name:nm,price:pr,change_pct:ch,updated_at:new Date().toISOString()},{onConflict:'ticker'}),
+      '주식 추가'
+    );
+    if(!ok)return; // 저장 실패 시 중단
+  }
   stockData.push(newStock);
   renderStocks();
   closeMod('md-add-stock');
   toast(`${nm}(${tk}) 추가됨 📈`,'s');
-  if(SB&&CP?.id!=='demo'&&!CP?._isGuest){
-    await sbSave(SB.from('stocks').upsert({ticker:tk,name:nm,price:pr,change_pct:ch,updated_at:new Date().toISOString()},{onConflict:'ticker'}),'주식 추가');
-  }
 }
 async function renderTx(){
   const wrap=document.getElementById('tx-wrap');
@@ -4776,6 +4781,9 @@ function admAssignJob(idx){
   const s=DSTU[idx];if(!s)return;
   const allJobs=getAllJobs();
   const mid='md-assign-job';document.getElementById(mid)?.remove();
+  // store idx for event delegation
+  window._assignJobIdx=idx;
+  const jobItems=[{nm:'학생',sal:0,desc:'기본 학생',ico:'🙋'},...allJobs];
   document.body.insertAdjacentHTML('beforeend',`
   <div class="ov on" id="${mid}">
     <div class="modal" style="width:min(440px,94vw)">
@@ -4783,25 +4791,32 @@ function admAssignJob(idx){
         <div class="mtitle">💼 ${escHtml(s.nm)} 직업 부여</div>
         <button class="mclose" onclick="closeMod('${mid}')"><svg viewBox="0 0 9 9" fill="none" width="9" height="9"><path d="M1 1l7 7M8 1L1 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
       </div>
-      <div style="display:flex;flex-direction:column;gap:8px;max-height:400px;overflow-y:auto">
-        <div onclick="confirmAssignJob(${idx},'학생',0)" style="padding:10px 14px;border:1.5px solid ${s.job==='학생'?'#3b82f6':'#eef2f8'};border-radius:12px;cursor:pointer;transition:.15s;background:${s.job==='학생'?'#eff6ff':'#fff'}" onmouseover="this.style.borderColor='#3b82f6'" onmouseout="this.style.borderColor='${s.job==='학생'?'#3b82f6':'#eef2f8'}'>
-          <div style="font-weight:700;color:#0f172a">🙋 학생 (기본)</div>
-          <div style="font-size:12px;color:#64748b;margin-top:2px">주급 0 CC</div>
-        </div>
-        ${allJobs.map(j=>`
-        <div onclick="confirmAssignJob(${idx},'${j.nm}',${j.sal||0})" style="padding:10px 14px;border:1.5px solid ${s.job===(j.nm)?'#3b82f6':'#eef2f8'};border-radius:12px;cursor:pointer;transition:.15s;background:${s.job===(j.nm)?'#eff6ff':'#fff'}" onmouseover="this.style.borderColor='#3b82f6'" onmouseout="this.style.borderColor='${s.job===(j.nm)?'#3b82f6':'#eef2f8'}'>
-          <div style="display:flex;align-items:center;gap:8px">
-            <div style="font-weight:700;color:#0f172a">${escHtml(j.nm||'직업')}</div>
-            <span class="chip chip-b" style="font-size:10px">주급 ${(j.sal||0).toLocaleString()} CC</span>
-          </div>
-          <div style="font-size:12px;color:#64748b;margin-top:2px">${escHtml(j.desc||'')}</div>
-        </div>`).join('')}
+      <div style="display:flex;flex-direction:column;gap:8px;max-height:400px;overflow-y:auto" id="assign-job-list">
+        ${jobItems.map((j,ji)=>{
+          const isCur=s.job===(j.nm);
+          return `<div class="assign-job-item" data-ji="${ji}" style="padding:10px 14px;border:1.5px solid ${isCur?'#3b82f6':'#eef2f8'};border-radius:12px;cursor:pointer;transition:.15s;background:${isCur?'#eff6ff':'#fff'}">
+            <div style="display:flex;align-items:center;gap:8px">
+              <div style="font-weight:700;color:#0f172a">${escHtml((j.ico||'💼')+' '+(j.nm||'직업'))}</div>
+              <span class="chip chip-b" style="font-size:10px">주급 ${(j.sal||0).toLocaleString()} CC</span>
+            </div>
+            <div style="font-size:12px;color:#64748b;margin-top:2px">${escHtml(j.desc||'')}</div>
+          </div>`;
+        }).join('')}
       </div>
       <div class="mfoot">
         <button class="btn btn-g" onclick="closeMod('${mid}')">취소</button>
       </div>
     </div>
   </div>`);
+  // Use event delegation to avoid inline onclick with special chars
+  document.getElementById('assign-job-list').addEventListener('click',function(e){
+    const item=e.target.closest('.assign-job-item');
+    if(!item)return;
+    const ji=parseInt(item.dataset.ji);
+    const j=jobItems[ji];
+    if(!j)return;
+    confirmAssignJob(window._assignJobIdx,j.nm,j.sal||0);
+  });
 }
 
 async function confirmAssignJob(idx,jobName,salary){
@@ -5986,8 +6001,9 @@ function submitQ(id){
     q.status='done';q.prog=q.total;
     CP.balance+=(q.reward||0);syncCoin();
     renderQuests();
-    toast(`✅ 퀘스트 완료! +${(q.reward||0).toLocaleString()} CC`,'s');
-    if(SB&&CU){
+    if(selQuestId===String(id))selectQuest(id);
+    toast('✅ 퀘스트 완료! +'+((q.reward||0).toLocaleString())+' CC','s');
+    if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest){
       sbSave(SB.from('quest_completions').upsert({quest_id:String(id),user_id:CU.id,status:'approved',approved_by:CU.id},{onConflict:'quest_id,user_id'}),'퀘스트 자동 완료');
       sbSave(SB.from('profiles').update({balance:CP.balance}).eq('id',CU.id),'잔액 저장');
       SB.from('transactions').insert({from_id:CU.id,to_id:CU.id,amount:q.reward||0,type:'reward',description:'퀘스트 보상: '+(q.title||''),class_id:CP.class_id||null}).then(()=>{},()=>{});
@@ -5997,15 +6013,15 @@ function submitQ(id){
   // 승인 필요 퀘스트
   q.status='pending';
   renderQuests();
+  if(selQuestId===String(id))selectQuest(id);
   toast('✅ 완료 제출! 선생님 승인 대기 중…','i');
-  // Supabase 저장
-  if(SB&&CU){
-    SB.from('quest_completions').upsert({
-      quest_id:String(id), user_id:CU.id, status:'pending'
-    },{onConflict:'quest_id,user_id'}).then(({error})=>{
-      if(error){toast('제출 저장 실패: '+error.message,'e');q.status='active';renderQuests();}
-    }).catch(e=>{toast('제출 오류: '+e.message,'e');q.status='active';renderQuests();});
-  }
+  // 데모/게스트: SB 저장 불필요
+  if(!SB||!CU||CP?.id==='demo'||CP?._isGuest)return;
+  SB.from('quest_completions').upsert({
+    quest_id:String(id), user_id:CU.id, status:'pending'
+  },{onConflict:'quest_id,user_id'}).then(function(res){
+    if(res&&res.error){toast('제출 저장 실패: '+res.error.message,'e');q.status='active';renderQuests();}
+  }).catch(function(e){toast('제출 오류: '+(e.message||'오류'),'e');q.status='active';renderQuests();});
 }
 function approveQuest(qid,uid,reward){
   const q=questData.find(q=>String(q.id)===String(qid));
@@ -6792,7 +6808,7 @@ function renderPost(p){
         </div>
         <div style="font-size:11.5px;color:#94a3b8;margin-top:1px">${p.ts}</div>
       </div>
-      ${(CP.name===p.author||CP.role==='teacher'||CP.role==='dev'||CP.role==='superadmin')?`<button onclick="deletePost(${p.id})" style="padding:5px 8px;border:none;background:none;cursor:pointer;color:#94a3b8;border-radius:8px;transition:.15s" onmouseover="this.style.background='#fee2e2';this.style.color='#dc2626'" onmouseout="this.style.background='none';this.style.color='#94a3b8'">
+      ${(CP.name===p.author||CP.role==='teacher'||CP.role==='dev'||CP.role==='superadmin')?`<button onclick="deletePost('${p.id}')" style="padding:5px 8px;border:none;background:none;cursor:pointer;color:#94a3b8;border-radius:8px;transition:.15s" onmouseover="this.style.background='#fee2e2';this.style.color='#dc2626'" onmouseout="this.style.background='none';this.style.color='#94a3b8'">
         <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M1.5 3h10M4.5 3V2a.5.5 0 01.5-.5h3a.5.5 0 01.5.5v1M10 3l-.5 8H3.5L3 3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>`:''}
     </div>
@@ -6801,11 +6817,11 @@ function renderPost(p){
     ${p.img?`<img src="${p.img}" style="width:100%;max-height:360px;object-fit:cover;border-bottom:1px solid #eef2f8" onclick="openImgViewer('${p.img}')">`:''}
     <!-- 좋아요/댓글 바 -->
     <div style="padding:10px 16px;border-top:1px solid #f1f5f9;display:flex;align-items:center;gap:12px">
-      <button onclick="toggleLike(${p.id})" style="display:flex;align-items:center;gap:5px;padding:6px 12px;border:1.5px solid ${isLiked?'#ec4899':'#e2e8f0'};background:${isLiked?'#fff0f6':'#fff'};border-radius:99px;cursor:pointer;font-size:13px;font-weight:700;color:${isLiked?'#ec4899':'#64748b'};transition:.15s">
+      <button onclick="toggleLike('${p.id}')" style="display:flex;align-items:center;gap:5px;padding:6px 12px;border:1.5px solid ${isLiked?'#ec4899':'#e2e8f0'};background:${isLiked?'#fff0f6':'#fff'};border-radius:99px;cursor:pointer;font-size:13px;font-weight:700;color:${isLiked?'#ec4899':'#64748b'};transition:.15s">
         <svg width="14" height="14" viewBox="0 0 14 14" fill="${isLiked?'#ec4899':'none'}"><path d="M7 12S1.5 8.5 1.5 4.8C1.5 3 3 1.5 4.8 1.5c1 0 1.9.5 2.5 1.3.6-.8 1.5-1.3 2.5-1.3C11.6 1.5 13 3 12.5 4.8 12.5 8.5 7 12 7 12z" stroke="${isLiked?'#ec4899':'currentColor'}" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
         ${p.likes.length||''}
       </button>
-      <button onclick="focusComment(${p.id})" style="display:flex;align-items:center;gap:5px;padding:6px 12px;border:1.5px solid #e2e8f0;background:#fff;border-radius:99px;cursor:pointer;font-size:13px;font-weight:700;color:#64748b;transition:.15s" onmouseover="this.style.borderColor='#94a3b8'" onmouseout="this.style.borderColor='#e2e8f0'">
+      <button onclick="focusComment('${p.id}')" style="display:flex;align-items:center;gap:5px;padding:6px 12px;border:1.5px solid #e2e8f0;background:#fff;border-radius:99px;cursor:pointer;font-size:13px;font-weight:700;color:#64748b;transition:.15s" onmouseover="this.style.borderColor='#94a3b8'" onmouseout="this.style.borderColor='#e2e8f0'">
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M12.5 7C12.5 9.5 10.5 11.5 8 11.5c-.7 0-1.4-.15-2-.4L2.5 12l.9-3.5C3 8 2.5 7.1 2.5 6.2 2.5 3.7 4.3 1.5 7 1.5c2.5 0 5.5 2 5.5 5.5z" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
         ${p.comments.length||''}
       </button>
@@ -6825,7 +6841,7 @@ function renderPost(p){
     <div style="padding:10px 16px;background:#fafbff;border-top:1px solid #f1f5f9;display:flex;gap:9px;align-items:center" id="comment-area-${p.id}">
       <div style="width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#1d4ed8,#3b82f6);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:#fff;flex-shrink:0">${(CP.name||'?')[0]}</div>
       <input id="comment-input-${p.id}" style="flex:1;padding:8px 12px;background:#fff;border:1.5px solid #e2e8f0;border-radius:12px;font-size:13px;color:#374151;outline:none;font-family:var(--font)" placeholder="댓글 남기기..." onfocus="this.style.borderColor='#3b82f6'" onblur="this.style.borderColor='#e2e8f0'" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();submitComment(${p.id});}">
-      <button onclick="submitComment(${p.id})" style="width:32px;height:32px;border:none;background:#1d4ed8;border-radius:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:.15s" onmouseover="this.style.background='#1e40af'" onmouseout="this.style.background='#1d4ed8'">
+      <button onclick="submitComment('${p.id}')" style="width:32px;height:32px;border:none;background:#1d4ed8;border-radius:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:.15s" onmouseover="this.style.background='#1e40af'" onmouseout="this.style.background='#1d4ed8'">
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M12 7H2M8 3l4 4-4 4" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
     </div>
@@ -6961,7 +6977,7 @@ function toggleLike(id){
   if(idx>=0)p.likes.splice(idx,1);else p.likes.push(nm);
   const post=document.getElementById('post-'+id);
   if(post){
-    const likeBtn=post.querySelector('button[onclick="toggleLike('+id+')"]');
+    const likeBtn=post.querySelector('button[onclick="toggleLike(\''+id+'\')"]');
     const isLiked=p.likes.includes(nm);
     if(likeBtn){
       likeBtn.style.borderColor=isLiked?'#ec4899':'#e2e8f0';
@@ -7555,7 +7571,7 @@ function renderNationalPost(p){
         <div style="font-size:14px;font-weight:800;color:#0f172a">${escHtml(p.author)}</div>
         <div style="font-size:11.5px;color:#94a3b8">${escHtml(p.school||'')}&nbsp;·&nbsp;${p.ts}</div>
       </div>
-      ${p.author===CP.name||CP.role==='teacher'||CP.role==='dev'||CP.role==='superadmin'?`<button onclick="deleteNPost(${p.id})" style="padding:5px;border:none;background:none;cursor:pointer;color:#94a3b8;border-radius:8px" onmouseover="this.style.color='#dc2626'" onmouseout="this.style.color='#94a3b8'"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 3.5h10M5 3.5V2.5a.5.5 0 01.5-.5h3a.5.5 0 01.5.5v1M11 3.5l-.5 8H3.5l-.5-8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`:''}
+      ${p.author===CP.name||CP.role==='teacher'||CP.role==='dev'||CP.role==='superadmin'?`<button onclick="deleteNPost('${p.id}')" style="padding:5px;border:none;background:none;cursor:pointer;color:#94a3b8;border-radius:8px" onmouseover="this.style.color='#dc2626'" onmouseout="this.style.color='#94a3b8'"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 3.5h10M5 3.5V2.5a.5.5 0 01.5-.5h3a.5.5 0 01.5.5v1M11 3.5l-.5 8H3.5l-.5-8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`:''}
     </div>
     <div style="padding:0 16px 12px;font-size:14px;color:#374151;line-height:1.65;white-space:pre-wrap">${escHtml(p.content)}</div>
     <div style="padding:10px 16px;border-top:1px solid #f1f5f9;display:flex;gap:10px">
@@ -7563,7 +7579,7 @@ function renderNationalPost(p){
         <svg width="14" height="14" viewBox="0 0 14 14" fill="${isLiked?'#ec4899':'none'}"><path d="M7 12S1.5 8.5 1.5 5C1.5 3.2 3 1.5 4.8 1.5c1 0 1.9.5 2.5 1.3.6-.8 1.5-1.3 2.5-1.3C11.6 1.5 12.5 3.2 12.5 5 12.5 8.5 7 12 7 12z" stroke="${isLiked?'#ec4899':'currentColor'}" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
         ${p.likes.length||''}
       </button>
-      <button onclick="focusNComment(${p.id})" style="display:flex;align-items:center;gap:5px;padding:6px 12px;border:1.5px solid #e2e8f0;background:#fff;border-radius:99px;cursor:pointer;font-size:13px;font-weight:700;color:#64748b;transition:.15s" onmouseover="this.style.borderColor='#94a3b8'" onmouseout="this.style.borderColor='#e2e8f0'">
+      <button onclick="focusNComment('${p.id}')" style="display:flex;align-items:center;gap:5px;padding:6px 12px;border:1.5px solid #e2e8f0;background:#fff;border-radius:99px;cursor:pointer;font-size:13px;font-weight:700;color:#64748b;transition:.15s" onmouseover="this.style.borderColor='#94a3b8'" onmouseout="this.style.borderColor='#e2e8f0'">
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M12.5 7C12.5 9.5 10.5 11.5 8 11.5c-.7 0-1.4-.15-2-.4L2.5 12l.9-3.5C3 8 2.5 7.1 2.5 6.2 2.5 3.7 4.3 1.5 7 1.5c2.5 0 5.5 2 5.5 5.5z" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
         ${p.comments.length||''}
       </button>
@@ -7580,7 +7596,7 @@ function renderNationalPost(p){
     </div>`:''}
     <div style="padding:10px 16px;border-top:1px solid #f1f5f9;display:flex;gap:8px" id="nc-area-${p.id}">
       <input id="nc-input-${p.id}" style="flex:1;padding:8px 12px;background:#f8faff;border:1.5px solid #e2e8f0;border-radius:12px;font-size:13px;outline:none;font-family:var(--font)" placeholder="댓글..." onfocus="this.style.borderColor='#3b82f6';this.style.background='#fff'" onblur="this.style.borderColor='#e2e8f0';this.style.background='#f8faff'" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();submitNComment(${p.id});}">
-      <button onclick="submitNComment(${p.id})" style="width:32px;height:32px;border:none;background:#1d4ed8;border-radius:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0" onmouseover="this.style.background='#1e40af'" onmouseout="this.style.background='#1d4ed8'">
+      <button onclick="submitNComment('${p.id}')" style="width:32px;height:32px;border:none;background:#1d4ed8;border-radius:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0" onmouseover="this.style.background='#1e40af'" onmouseout="this.style.background='#1d4ed8'">
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M12 7H2M8 3l4 4-4 4" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
     </div>
@@ -8715,7 +8731,7 @@ function selectQuest(id){
         </div>
         <div style="font-size:12px;color:#94a3b8">${q.prog}/${q.total}명 완료</div>
       </div>
-      ${canSubmit?`<button class="btn btn-p" style="width:100%;height:48px;font-size:15px" onclick="submitQ(${q.id})">
+      ${canSubmit?`<button class="btn btn-p" style="width:100%;height:48px;font-size:15px" onclick="submitQ('${q.id}')">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 8l4 4 6-7" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         퀘스트 완료 제출
       </button>`:''}
@@ -8790,7 +8806,62 @@ function bulkApproveQuest(qid,reward){
   pending.forEach(a=>approveQuest(qid,a.uid,reward));
 }
 
-function selectQuestStu(uid,qid){}
+function selectQuestStu(uid,qid){
+  const q=questData.find(q=>String(q.id)===String(qid));
+  const s=DSTU.find(s=>s.id===uid)||{nm:'학생'};
+  const already=questApprovals.find(a=>String(a.qid)===String(qid)&&a.uid===uid);
+  const mid='md-quest-stu';
+  document.getElementById(mid)?.remove();
+  const reward=q?.reward||0;
+  // DOM 방식으로 생성 - 문자열 탈출 오류 완전 방지
+  const ov=document.createElement('div');
+  ov.className='ov on';ov.id=mid;
+  const modal=document.createElement('div');
+  modal.className='modal';modal.style.cssText='width:min(380px,94vw)';
+  // header
+  const hdr=document.createElement('div');hdr.className='mhdr';
+  const ttl=document.createElement('div');ttl.className='mtitle';
+  ttl.textContent='📋 '+s.nm+' 퀘스트 처리';
+  const cls=document.createElement('button');cls.className='mclose';
+  cls.innerHTML='<svg viewBox="0 0 9 9" fill="none" width="9" height="9"><path d="M1 1l7 7M8 1L1 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
+  cls.onclick=()=>closeMod(mid);
+  hdr.appendChild(ttl);hdr.appendChild(cls);
+  // body
+  const body=document.createElement('div');body.style.cssText='padding:16px 0';
+  const tb=document.createElement('b');tb.textContent=q?.title||'퀘스트';
+  const td=document.createElement('div');td.style.cssText='color:#64748b;font-size:13px;margin-top:6px;margin-bottom:14px';
+  td.textContent=q?.desc||'';
+  const statusBox=document.createElement('div');
+  if(already){
+    statusBox.style.cssText='background:#f0fdf4;border:1.5px solid #86efac;border-radius:12px;padding:12px;text-align:center;font-weight:700;color:#15803d';
+    statusBox.textContent='✅ 이미 완료된 학생이에요';
+  }else{
+    statusBox.style.cssText='background:#fffbeb;border:1.5px solid #fde68a;border-radius:12px;padding:12px;text-align:center;font-size:13px;color:#92400e';
+    statusBox.innerHTML='아직 제출하지 않은 학생입니다.<br>수동으로 보상을 지급할 수 있어요.';
+  }
+  body.appendChild(tb);body.appendChild(td);body.appendChild(statusBox);
+  // footer
+  const foot=document.createElement('div');foot.className='mfoot';
+  const cancelBtn=document.createElement('button');cancelBtn.className='btn btn-g';
+  cancelBtn.textContent='닫기';cancelBtn.onclick=()=>closeMod(mid);
+  foot.appendChild(cancelBtn);
+  if(!already){
+    const rwBtn=document.createElement('button');rwBtn.className='btn btn-s';
+    rwBtn.textContent='보상 지급';
+    // 클로저로 파라미터 캡처 - 문자열 onclick 불필요
+    rwBtn.onclick=(function(pQid,pUid,pReward,pMid){
+      return function(){
+        approveQuest(pQid,pUid,pReward);
+        closeMod(pMid);
+        setTimeout(function(){selectQuest(pQid);},100);
+      };
+    })(qid,uid,reward,mid);
+    foot.appendChild(rwBtn);
+  }
+  modal.appendChild(hdr);modal.appendChild(body);modal.appendChild(foot);
+  ov.appendChild(modal);
+  document.body.appendChild(ov);
+}
 
 async function deleteQuest(id){
   if(!confirm('퀘스트를 삭제할까요?'))return;

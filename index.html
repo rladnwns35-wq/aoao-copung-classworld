@@ -1580,10 +1580,6 @@ function checkJobPerm(permId,actionLabel){
   toast(`💼 "${actionLabel||permId}" 권한이 없어요. 직업 권한을 확인하세요.`,'e');
   return true; // 차단
 }
-/* 선생님이거나 해당 권한 보유 — UI 표시 여부 결정용 */
-function canDo(permId){
-  return CP?.role==='teacher'||CP?.role==='dev'||CP?.role==='superadmin'||hasJobPerm(permId);
-}
 
 let questData=[];
 const SB_URL='https://puauncwwtbnsieulvhca.supabase.co';
@@ -2598,11 +2594,7 @@ const NAV_ITEMS={
 };
 function buildNav(){
   const r=CP.role;
-  let items=NAV_ITEMS[r]||NAV_ITEMS.student;
-  // 학생이지만 직업 권한이 있으면 관리 메뉴 추가
-  if(r==='student'&&_studentHasAnyPerm()){
-    items=[...items,{pg:'pg-admin',l:'관리'}];
-  }
+  const items=NAV_ITEMS[r]||NAV_ITEMS.student;
   document.getElementById('nav-links').innerHTML=items.map(i=>`<button class="nl${i.pg==='pg-dash'?' on':''}" onclick="goPage('${i.pg}')">${i.l}</button>`).join('');
   const rmap={teacher:'선생님',student:'학생',dev:'개발자'};
   const rcls={teacher:'rp-t',student:'rp-s',dev:'rp-d'};
@@ -2619,11 +2611,6 @@ function buildNav(){
     clsBadge.style.display=cn?'flex':'none';
   }
   updateNavAvatar();
-}
-/* 학생이 하나라도 직업 권한을 갖고 있는지 확인 */
-function _studentHasAnyPerm(){
-  if(CP?.role!=='student')return false;
-  return ALL_PERMISSIONS.some(p=>hasJobPerm(p.id));
 }
 
 const SB_ICONS={
@@ -2656,8 +2643,6 @@ function buildSidebar(){
     h+=sgrp('커뮤니티',[{pg:'pg-comm',l:'커뮤니티',ic:'comm'},{pg:'pg-rank',l:'자산 순위',ic:'rank'},{pg:'pg-meal',l:'급식 메뉴',ic:'meal'},{pg:'pg-schedule',l:'일정',ic:'sched'}]);
   }
   if(r==='teacher'||r==='dev')h+=sgrp('관리',[{pg:'pg-admin',l:'관리자 패널',ic:'admin'}]);
-  // 학생이지만 직업 권한 보유 시 관리 메뉴 추가
-  if(r==='student'&&_studentHasAnyPerm())h+=sgrp('직업 권한',[{pg:'pg-admin',l:'권한 패널',ic:'admin'}]);
   if(r==='dev'||r==='superadmin')h+=sgrp(r==='superadmin'?'👑 슈퍼 관리자':'개발자',[{pg:'pg-dev',l:r==='superadmin'?'서버 관리 콘솔':'개발자 어드민',ic:'dev'}]);
   document.getElementById('sidebar').innerHTML=h;
   document.querySelector('.si[data-pg="pg-dash"]')?.classList.add('on');
@@ -4248,32 +4233,6 @@ async function loadDSTU(force){
   _dstuLoaded=true;
 }
 async function admTab(tab,btn){
-  // 학생의 경우 권한 없는 탭 접근 차단
-  if(CP?.role==='student'){
-    const permMap={
-      shop:'shop_manage', notice:'announce', seating:'seat_manage',
-      credit:'credit_view', quests:'quest_approve'
-    };
-    const requiredPerm=permMap[tab];
-    if(requiredPerm&&!hasJobPerm(requiredPerm)){
-      toast(`💼 "${tab}" 탭 접근 권한이 없어요`,'e');
-      return;
-    }
-    // 학생에게 허용되지 않는 탭 (students, jobs, time, classmanage, board)
-    const studentForbidden=['students','jobs','time','classmanage','board'];
-    if(studentForbidden.includes(tab)){
-      toast('선생님만 접근할 수 있어요','e');
-      return;
-    }
-    // 탭 버튼 표시 제어 — 권한 있는 탭만 활성화
-    document.querySelectorAll('#adm-tabs .admtab').forEach(b=>{
-      const tabName=b.getAttribute('onclick')?.match(/'([^']+)'/)?.[1];
-      if(!tabName)return;
-      const perm=permMap[tabName];
-      const forbidden=studentForbidden.includes(tabName);
-      b.style.display=(forbidden||( perm&&!hasJobPerm(perm)))?'none':'';
-    });
-  }
   if(btn){document.querySelectorAll('#adm-tabs .admtab').forEach(b=>b.classList.remove('on'));btn.classList.add('on');}
   const el=document.getElementById('adm-body');
   switch(tab){

@@ -2099,6 +2099,17 @@ function guestLogin(type){
         const curJ=allJ.find(j=>j.nm===CP.job);
         if(curJ)CP.jobPerms=curJ.perms||[];
         else CP.jobPerms=[];
+        // 커스텀 직업이어서 아직 customJobs 로드 전일 경우, 클래스 settings 로드 후 재시도
+        if(!CP.jobPerms.length&&CP.class_id&&SB&&typeof mergeClassSettings==='function'){
+          SB.from('classes').select('settings').eq('id',CP.class_id).maybeSingle().then(function(res){
+            const s=res&&res.data&&res.data.settings;
+            if(s&&s.customJobs&&Array.isArray(s.customJobs)){
+              if(!customJobs||!customJobs.length) customJobs=s.customJobs;
+              const cj=s.customJobs.find(function(j){return j.nm===CP.job;});
+              if(cj) CP.jobPerms=cj.perms||[];
+            }
+          }).catch(function(){});
+        }
       } else {
         CP.jobPerms=[];
       }
@@ -2203,6 +2214,17 @@ function initRealtimeSubscriptions(){
         const allJ=typeof getAllJobs==='function'?getAllJobs():[...DJOBS,...(customJobs||[]).map((j,i)=>({...j,id:'c'+i,custom:true}))];
         const curJ=allJ.find(j=>j.nm===d.job);
         CP.jobPerms=curJ?.perms||[];
+        // 커스텀 직업이어서 perms 못 찾았으면 settings에서 재시도
+        if(!CP.jobPerms.length&&CP.class_id&&SB){
+          SB.from('classes').select('settings').eq('id',CP.class_id).maybeSingle().then(function(res){
+            const s=res&&res.data&&res.data.settings;
+            if(s&&s.customJobs){
+              if(!customJobs||!customJobs.length)customJobs=s.customJobs;
+              const cj=s.customJobs.find(function(j){return j.nm===d.job;});
+              if(cj)CP.jobPerms=cj.perms||[];
+            }
+          }).catch(function(){});
+        }
       }
       // 직업 승인됨 알림
       if(d.job&&d.job!==prevJob&&d.job!=='학생'){
@@ -3852,20 +3874,26 @@ function shopTab(tab,btn){
     const _bankShop=isBankrupt();
     const canManageShop=CP.role==='teacher'||CP.role==='dev'||CP.role==='superadmin'||hasJobPerm('shop_manage');
     el.innerHTML=`${canManageShop?`<div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn btn-p btn-sm" onclick="openMod('md-additem')">+ 아이템 추가</button></div>`:''}
-    ${_bankShop?`<div style="background:#fef2f2;border:2px solid #fca5a5;border-radius:12px;padding:11px 15px;margin-bottom:12px;display:flex;align-items:center;gap:10px"><span style="font-size:20px">💸</span><div style="font-size:13px;font-weight:700;color:#dc2626">파산 상태 — 구매 불가<span style="font-size:12px;font-weight:400;color:#ef4444;margin-left:6px">퀘스트로 코인을 벌어서 빚을 먼저 갚아요</span></div></div>`:''}
+    ${_bankShop?`<div style="background:#fef2f2;border:2px solid #fca5a5;border-radius:12px;padding:11px 15px;margin-bottom:12px;display:flex;align-items:center;gap:10px"><span style="font-size:20px">&#x1F4B8;</span><div style="font-size:13px;font-weight:700;color:#dc2626">파산 상태 — 구매 불가<span style="font-size:12px;font-weight:400;color:#ef4444;margin-left:6px">퀘스트로 코인을 벌어서 빚을 먼저 갚아요</span></div></div>`:''}
     ${_si.length===0?'<div class="empty"><div class="empty-t">등록된 아이템이 없어요</div><div class="empty-s">선생님이 아이템을 추가하면 나타나요</div></div>':
-    `<table class="shop-table"><thead><tr><th>분류</th><th>아이템</th><th>가격</th><th>재고</th><th></th></tr></thead><tbody>
-    ${cats.map(cat=>{
-      const items=_si.filter(i=>i.cat===cat);
-      return items.map((it,idx)=>`<tr onclick="${_bankShop?'toast(\'💸 파산 상태 — 구매 불가. 퀘스트로 코인을 먼저 벌어요!\',\'e\')':'buyItem(\''+it.id+'\')'}" style="${_bankShop?'opacity:.6;cursor:not-allowed':'cursor:pointer'}">
-        <td>${idx===0?`<span class="shop-cat-badge cat-${cat}">${cat}</span>`:''}</td>
-        <td><div style="font-weight:600">${it.nm||it.name||''}</div><div style="font-size:11.5px;color:var(--text4)">${it.desc||it.description||''}</div></td>
-        <td><div class="shop-price-cell"><div class="cc-coin-ico cc-coin-ico-sm">C</div>${(it.pr||it.price||0).toLocaleString()}</div></td>
-        <td>${(it.st??it.stock??-1)<0?'<span style="color:var(--text4);font-size:12px">무제한</span>':(it.st??it.stock??0)===0?'<span class="shop-stock-no">품절</span>':`<span class="shop-stock-ok">재고 ${it.st??it.stock}</span>`}</td>
-        <td><button class="btn btn-p btn-xs" onclick="event.stopPropagation();buyItem('${it.id}')" ${(it.st??it.stock??-1)===0||_bankShop?'disabled':''} ${_bankShop?'title="파산 상태 — 구매 불가"':''}>구매</button></td>
-      </tr>`).join('');
-    }).join('')}
-    </tbody></table>`}`;
+    '<table class="shop-table"><thead><tr><th>분류</th><th>아이템</th><th>가격</th><th>재고</th><th></th></tr></thead><tbody>'+
+    cats.map(function(cat){
+      const items=_si.filter(function(i){return i.cat===cat;});
+      return items.map(function(it,idx){
+        var disabled=(it.st!=null&&it.st!=-1&&it.st==0)||_bankShop;
+        var buyClick=_bankShop?"toast('파산 상태 — 구매 불가','e')":"buyItem('"+it.id+"')";
+        var stockHtml=(it.st==null||it.st==-1)?'<span style="color:var(--text4);font-size:12px">무제한</span>':(it.st===0?'<span class="shop-stock-no">품절</span>':'<span class="shop-stock-ok">재고 '+it.st+'</span>');
+        var manageHtml=canManageShop?('<button class="btn btn-g btn-xs" onclick="event.stopPropagation();openEditShopItem(\''+it.id+'\')" style="margin-right:3px">수정</button><button class="btn btn-r btn-xs" onclick="event.stopPropagation();delItem(\''+it.id+'\')">삭제</button>'):'';
+        return '<tr onclick="'+buyClick+'" style="'+(disabled?'opacity:.6;cursor:not-allowed':'cursor:pointer')+'">'
+          +'<td>'+(idx===0?'<span class="shop-cat-badge cat-'+cat+'">'+cat+'</span>':'')+'</td>'
+          +'<td><div style="font-weight:600">'+escHtml(it.nm||it.name||'')+'</div><div style="font-size:11.5px;color:var(--text4)">'+escHtml(it.desc||it.description||'')+'</div></td>'
+          +'<td><div class="shop-price-cell"><div class="cc-coin-ico cc-coin-ico-sm">C</div>'+(it.pr||it.price||0).toLocaleString()+'</div></td>'
+          +'<td>'+stockHtml+'</td>'
+          +'<td style="display:flex;gap:3px;align-items:center"><button class="btn btn-p btn-xs" onclick="event.stopPropagation();buyItem(\''+it.id+'\')" '+(disabled?'disabled':'')+((_bankShop)?' title="파산 상태 — 구매 불가"':'')+'">구매</button>'+manageHtml+'</td>'
+          +'</tr>';
+      }).join('');
+    }).join('')+
+    '</tbody></table>'}`;
   } else if(tab==='myitems'){
     const inv=CP.inventory.filter(i=>i.type!=='avatar'&&i.type!=='banner');
     el.innerHTML=`<div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn btn-g btn-sm" onclick="openListMarket()">+ 중고 판매 등록</button></div>
@@ -4140,7 +4168,15 @@ function applyJob(id){
   // 학생 역할이고 승인 필요한 직업이면 pendingJob에 저장
   if(CP.role==='student'&&j.require_approval!==false){
     CP.pendingJob=j.nm; CP.pendingJobId=id;
-    if(SB&&CU) sbSave(SB.from('profiles').update({pending_job:j.nm}).eq('id',CU.id),'직업 신청 저장');
+    if(SB&&CU){
+      sbSave(SB.from('profiles').update({pending_job:j.nm}).eq('id',CU.id),'직업 신청 저장');
+      // job_applications 테이블에도 기록 (선생님 알림용)
+      SB.from('job_applications').upsert({
+        user_id:CU.id,user_name:CP.name||'학생',
+        job_name:j.nm,class_id:CP.class_id||null,
+        status:'pending',applied_at:new Date().toISOString()
+      },{onConflict:'user_id'}).then(function(){},function(){});
+    }
     loadJobs();
     toast(j.nm+' 신청 완료! 선생님 승인 대기 중 ⏳','s');
   } else {
@@ -4162,17 +4198,23 @@ async function approveJobApp(stuId){
   const jobSal=j?.sal||0;
   const jobPerms=j?.perms||[];
   s.job=jobNm; s.job_salary=jobSal; s.perms=jobPerms; delete s.pendingJob;
-  toast(`✅ ${s.nm}의 직업 "${jobNm}" 승인됨`,'s');
+  toast('✅ '+s.nm+'의 직업 "'+jobNm+'" 승인됨','s');
   if(SB&&s.id&&!s.id.startsWith('s')){
     await sbSave(SB.from('profiles').update({
       job:jobNm,
       job_salary:jobSal,
       pending_job:null
     }).eq('id',stuId),'직업 승인 저장');
+    // job_applications 승인 처리
+    try{
+      await SB.from('job_applications').update({status:'approved',approved_by:CU?.id})
+        .eq('user_id',stuId).eq('status','pending');
+    }catch(_){}
   }
   // 만약 자신의 직업 승인이면 CP도 즉시 갱신
   if(CU&&stuId===CU.id){
     CP.job=jobNm; CP.job_salary=jobSal; CP.pendingJob=null; CP.jobPerms=jobPerms;
+    syncCoin();
   }
   // 배지 업데이트 및 탭 새로고침
   const pendingCount=DSTU.filter(x=>x.pendingJob).length;
@@ -4888,12 +4930,21 @@ async function confirmAssignJob(idx,jobName,salary){
   closeMod('md-assign-job');
   toast(`${s.nm}의 직업: ${jobName} (주급 ${salary.toLocaleString()} CC)`,'s');
   if(SB&&s.id&&!s.id.startsWith('s')&&CP?.id!=='demo'&&!CP?._isGuest){
-    await sbSave(SB.from('profiles').update({job:jobName,job_salary:salary}).eq('id',s.id),'직업 부여 저장');
+    // pending_job 초기화 포함
+    await sbSave(SB.from('profiles').update({job:jobName,job_salary:salary,pending_job:null}).eq('id',s.id),'직업 부여 저장');
     // 직업 신청 상태가 있으면 승인처리
     try{
       await SB.from('job_applications').update({status:'approved',approved_by:CU?.id})
         .eq('user_id',s.id).eq('status','pending');
     }catch(_){}
+  }
+  // 만약 자신에게 직업 부여한 경우 CP도 즉시 갱신
+  if(CU&&s.id===CU.id){
+    CP.job=jobName; CP.job_salary=salary; CP.pendingJob=null;
+    const allJ=typeof getAllJobs==='function'?getAllJobs():[...DJOBS,...(customJobs||[]).map((j,i)=>({...j,id:'c'+i,custom:true}))];
+    const curJ=allJ.find(j=>j.nm===jobName);
+    CP.jobPerms=curJ?.perms||[];
+    syncCoin();
   }
   admTab('students',null);
 }
@@ -5172,6 +5223,47 @@ function delItem(id){confirmDel('이 상품을 삭제할까요?',()=>{
   admTab('shop',null);toast('삭제','i');
   if(SB) sbSave(SB.from('shop_items').update({is_active:false}).eq('id',String(id)),'상점 저장');
 });}
+
+function openEditShopItem(id){
+  var it=shopItems.find(function(i){return String(i.id)===String(id);});
+  if(!it){toast('아이템을 찾을 수 없어요','e');return;}
+  var mid='md-edit-shopitem';
+  document.getElementById(mid)&&document.getElementById(mid).remove();
+  var closeBtn='<button class="mclose" onclick="var m=document.getElementById(&quot;'+mid+'&quot;);if(m)m.remove()"><svg viewBox="0 0 9 9" fill="none" width="9" height="9"><path d="M1 1l7 7M8 1L1 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>';
+  var cancelBtn='<button class="btn btn-g" onclick="var m=document.getElementById(&quot;'+mid+'&quot;);if(m)m.remove()">취소</button>';
+  document.body.insertAdjacentHTML('beforeend',
+    '<div class="ov on" id="'+mid+'">'
+    +'<div class="modal" style="width:min(400px,94vw)">'
+    +'<div class="mhdr"><div class="mtitle">&#x270F;&#xFE0F; 아이템 수정</div>'+closeBtn+'</div>'
+    +'<div style="display:flex;flex-direction:column;gap:10px">'
+    +'<div class="fg"><label class="fl">상품명</label><input class="fi" id="esi-nm" value="'+escHtml(it.nm||'')+'"></div>'
+    +'<div class="fg"><label class="fl">설명</label><input class="fi" id="esi-desc" value="'+escHtml(it.desc||'')+'"></div>'
+    +'<div class="fg"><label class="fl">가격 (CC)</label><input class="fi" id="esi-pr" type="number" value="'+(it.pr||0)+'"></div>'
+    +'<div class="fg"><label class="fl">재고 (-1=무제한)</label><input class="fi" id="esi-st" type="number" value="'+(it.st!=null?it.st:-1)+'"></div>'
+    +'<input type="hidden" id="esi-id" value="'+id+'">'
+    +'</div>'
+    +'<div class="mfoot">'+cancelBtn+'<button class="btn btn-p" onclick="confirmEditShopItem()">저장</button></div>'
+    +'</div></div>'
+  );
+}
+async function confirmEditShopItem(){
+  var id=document.getElementById('esi-id')&&document.getElementById('esi-id').value;
+  var nm=(document.getElementById('esi-nm')&&document.getElementById('esi-nm').value||'').trim();
+  var desc=(document.getElementById('esi-desc')&&document.getElementById('esi-desc').value||'').trim();
+  var pr=parseInt(document.getElementById('esi-pr')&&document.getElementById('esi-pr').value)||0;
+  var st=parseInt(document.getElementById('esi-st')&&document.getElementById('esi-st').value);
+  if(isNaN(st))st=-1;
+  if(!nm){toast('상품명을 입력하세요','e');return;}
+  var it=shopItems.find(function(i){return String(i.id)===String(id);});
+  if(it){it.nm=nm;it.desc=desc;it.pr=pr;it.st=st;}
+  var mid=document.getElementById('md-edit-shopitem');
+  if(mid)mid.remove();
+  toast('아이템 수정됨 ✅','s');
+  if(SB&&id&&id.indexOf('tmp')!==0){
+    await sbSave(SB.from('shop_items').update({name:nm,description:desc,price:pr,stock:st}).eq('id',id),'상점 수정 저장');
+  }
+  shopTab('items',null);
+}
 function saveTime(){
   const start=document.getElementById('ts')?.value||'09:00';
   const end=document.getElementById('te')?.value||'17:00';
@@ -7094,9 +7186,8 @@ function toggleLike(id){
       likeBtn.innerHTML=`<svg width="14" height="14" viewBox="0 0 14 14" fill="${isLiked?'#ec4899':'none'}"><path d="M7 12S1.5 8.5 1.5 4.8C1.5 3 3 1.5 4.8 1.5c1 0 1.9.5 2.5 1.3.6-.8 1.5-1.3 2.5-1.3C11.6 1.5 13 3 12.5 4.8 12.5 8.5 7 12 7 12z" stroke="${isLiked?'#ec4899':'currentColor'}" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>${p.likes.length||''}`;
     }
   }
-  // UUID 형식이면 board_posts.likes 배열 업데이트
-  const isUUID=String(id).length>20&&String(id).includes('-');
-  if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest&&isUUID){
+  // board_posts.likes 배열 업데이트 (DB id가 있으면 항상 저장)
+  if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest&&id){
     SB.from('board_posts').update({likes:p.likes}).eq('id',String(id)).then(()=>{},()=>{});
   }
 }
@@ -7119,8 +7210,7 @@ function submitComment(id){
   if(container){
     container.innerHTML=boardPosts.slice().reverse().map(pp=>renderPost(pp)).join('');
   }
-  const isUUID=String(id).length>20&&String(id).includes('-');
-  if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest&&isUUID){
+  if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest&&id){
     SB.from('board_post_comments').insert({post_id:String(id),author_name:CP.name||'나',content:txt}).then(()=>{},()=>{});
   }
   toast('댓글 등록!','s');
@@ -7809,8 +7899,7 @@ function toggleNLike(id){
   const el=document.getElementById('np-'+id);
   if(el){const newHtml=renderNationalPost(p);const tmp=document.createElement('div');tmp.innerHTML=newHtml;el.replaceWith(tmp.firstChild);}
   if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest&&p.id){
-    const isUUID=String(p.id).length>20&&String(p.id).includes('-');
-    if(isUUID) SB.from('board_posts').update({likes:p.likes}).eq('id',String(p.id)).then(()=>{},()=>{});
+    SB.from('board_posts').update({likes:p.likes}).eq('id',String(p.id)).then(()=>{},()=>{});
   }
 }
 function focusNComment(id){document.getElementById('nc-input-'+id)?.focus();}
@@ -7826,8 +7915,7 @@ function submitNComment(id){
   if(el){const newHtml=renderNationalPost(p);const tmp=document.createElement('div');tmp.innerHTML=newHtml;el.replaceWith(tmp.firstChild);}
   toast('💬 댓글 등록!','s');
   if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest&&p.id){
-    const isUUID=String(p.id).length>20&&String(p.id).includes('-');
-    if(isUUID) SB.from('board_post_comments').insert({post_id:String(p.id),author_name:CP.name||'익명',content:txt}).then(()=>{},()=>{});
+    SB.from('board_post_comments').insert({post_id:String(p.id),author_name:CP.name||'익명',content:txt}).then(()=>{},()=>{});
   }
 }
 function deleteNPost(id){
@@ -8001,8 +8089,10 @@ function pedSave(){
   try{new Function(code);}catch(synErr){toast('코드 문법 오류: '+synErr.message,'e');return;}
   if(pedEditId){
     const idx=userPlugins.findIndex(p=>String(p.id)===String(pedEditId));
-    if(idx>=0){userPlugins[idx]={...userPlugins[idx],nm,desc,tag,code};}
-    toast(`${nm} 수정 완료!`,'s');
+    if(idx>=0){
+      userPlugins[idx]=Object.assign({},userPlugins[idx],{nm:nm,desc:desc||'사용자 플러그인',tag:tag,code:code});
+    }
+    toast(nm+' 수정 완료!','s');
   } else {
     const newP={id:'u_'+Date.now(),nm,desc:desc||'사용자 플러그인',tag,code,
       by:CP.name||'사용자',stars:0,dl:0,_user:true};
@@ -8017,12 +8107,16 @@ function pedSave(){
 }
 
 function deleteUserPlugin(id){
-  const p=userPlugins.find(p=>String(p.id)===String(id));
-  if(!p||!confirm(`"${p.nm}"을 삭제할까요?`))return;
-  userPlugins=userPlugins.filter(p=>String(p.id)!==String(id));
-  installedSet.delete(String(id));
+  const pid=String(id);
+  const p=userPlugins.find(p=>String(p.id)===pid);
+  if(!p||!confirm('"'+p.nm+'"을 삭제할까요?'))return;
+  userPlugins=userPlugins.filter(p=>String(p.id)!==pid);
+  installedSet.delete(pid);
   savePluginStorage();
   renderMyPlugins();
+  // 스토어에서도 제거 반영
+  const srch=document.getElementById('plg-srch');
+  if(document.getElementById('comm-body')&&srch!==null){filterPlugins(srch.value||'');}
   toast('삭제됐어요','i');
 }
 
@@ -9765,7 +9859,7 @@ function openPluginEditor(editId){
     });
   }
   pedEditId=editId||null;
-  const p=editId?userPlugins.find(p=>p.id===editId):null;
+  const p=editId?userPlugins.find(p=>String(p.id)===String(editId)):null;
   const tab=document.getElementById('ped-title-tab');
   if(tab)tab.textContent=p?('수정: '+p.nm):'새 플러그인';
   document.getElementById('ped-nm').value=p?.nm||'';
@@ -9967,9 +10061,8 @@ function toggleTeacherLike(id){
   if(idx>=0)p.likes.splice(idx,1);else p.likes.push(nm);
   const el=document.getElementById('tp-'+id);
   if(el){const tmp=document.createElement('div');tmp.innerHTML=renderTeacherPost(p);el.replaceWith(tmp.firstChild);}
-  if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest){
-    const isUUID=String(p.id).length>20&&String(p.id).includes('-');
-    if(isUUID) SB.from('board_posts').update({likes:p.likes}).eq('id',String(p.id)).then(()=>{},()=>{});
+  if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest&&p.id){
+    SB.from('board_posts').update({likes:p.likes}).eq('id',String(p.id)).then(()=>{},()=>{});
   }
 }
 function deleteTeacherPost(id){

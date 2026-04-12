@@ -64,7 +64,7 @@ async function syncProfile(fields){
   var urls=[
     'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.7/dist/umd/supabase.min.js',
     'https://unpkg.com/@supabase/supabase-js@2.39.7/dist/umd/supabase.min.js',
-    'https://cdnjs.cloudflare.com/ajax/libs/supabase/2.39.7/umd/supabase.min.js',
+    'https://esm.sh/@supabase/supabase-js@2.39.7?bundle',
   ];
   var idx=0;
   window._sbLoaded=false;
@@ -1567,12 +1567,20 @@ const ALL_PERMISSIONS=[
 function hasJobPerm(permId){
   if(CP?.role==='teacher'||CP?.role==='dev'||CP?.role==='superadmin')return true;
   if(CP?.role!=='student')return false;
-  const allJ=getAllJobs();
-  const curJob=allJ.find(j=>j.nm===CP?.job);
-  if(!curJob)return false;
-  const perms=curJob.perms||[];
-  // id 또는 label로 체크
-  return perms.some(p=>p===permId||p===ALL_PERMISSIONS.find(x=>x.id===permId)?.label);
+  // permId에 해당하는 label도 구해둠
+  const permLabel=ALL_PERMISSIONS.find(x=>x.id===permId)?.label||permId;
+  // 1) CP.jobPerms가 있으면 우선 사용
+  if(Array.isArray(CP.jobPerms)&&CP.jobPerms.length>0){
+    return CP.jobPerms.some(p=>p===permId||p===permLabel);
+  }
+  // 2) fallback: getAllJobs에서 현재 직업 찾아서 확인
+  try{
+    const allJ=getAllJobs();
+    const curJob=allJ.find(j=>j.nm===CP?.job);
+    if(!curJob)return false;
+    const perms=curJob.perms||[];
+    return perms.some(p=>p===permId||p===permLabel);
+  }catch(_){return false;}
 }
 /* 직업 권한 체크 후 차단 — 권한 없으면 toast 후 true 반환 */
 function checkJobPerm(permId,actionLabel){
@@ -3838,7 +3846,8 @@ function shopTab(tab,btn){
     const _si=shopItems.length?shopItems:DSHOP;
     const cats=[...new Set(_si.map(i=>i.cat))];
     const _bankShop=isBankrupt();
-    el.innerHTML=`${CP.role==='teacher'||CP.role==='dev'||CP.role==='superadmin'?`<div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn btn-p btn-sm" onclick="openMod('md-additem')">+ 아이템 추가</button></div>`:''}
+    const canManageShop=CP.role==='teacher'||CP.role==='dev'||CP.role==='superadmin'||hasJobPerm('shop_manage');
+    el.innerHTML=`${canManageShop?`<div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn btn-p btn-sm" onclick="openMod('md-additem')">+ 아이템 추가</button></div>`:''}
     ${_bankShop?`<div style="background:#fef2f2;border:2px solid #fca5a5;border-radius:12px;padding:11px 15px;margin-bottom:12px;display:flex;align-items:center;gap:10px"><span style="font-size:20px">💸</span><div style="font-size:13px;font-weight:700;color:#dc2626">파산 상태 — 구매 불가<span style="font-size:12px;font-weight:400;color:#ef4444;margin-left:6px">퀘스트로 코인을 벌어서 빚을 먼저 갚아요</span></div></div>`:''}
     ${_si.length===0?'<div class="empty"><div class="empty-t">등록된 아이템이 없어요</div><div class="empty-s">선생님이 아이템을 추가하면 나타나요</div></div>':
     `<table class="shop-table"><thead><tr><th>분류</th><th>아이템</th><th>가격</th><th>재고</th><th></th></tr></thead><tbody>
@@ -4123,23 +4132,17 @@ function editJobPerms(jobId){
 function applyJob(id){
   const allJ=getAllJobs();
   const j=allJ.find(j=>j.id===id||String(j.id)===String(id));
-  if(!j){toast('직업을 찾을 수 없어요','e');return;}
-  // 이미 같은 직업이면 중단
-  if(CP.job===j.nm){toast('이미 이 직업이에요','i');return;}
+  if(!j)return;
   // 학생 역할이고 승인 필요한 직업이면 pendingJob에 저장
   if(CP.role==='student'&&j.require_approval!==false){
-    // 이미 신청 대기 중이면 재신청 방지
-    if(CP.pendingJob){
-      toast(`이미 "${CP.pendingJob}" 신청 대기 중이에요. 선생님 승인을 기다려주세요 ⏳`,'i');
-      return;
-    }
-    CP.pendingJob=j.nm; CP.pendingJobId=String(id);
+    CP.pendingJob=j.nm; CP.pendingJobId=id;
     if(SB&&CU) sbSave(SB.from('profiles').update({pending_job:j.nm}).eq('id',CU.id),'직업 신청 저장');
     loadJobs();
     toast(j.nm+' 신청 완료! 선생님 승인 대기 중 ⏳','s');
   } else {
-    // 선생님이거나 즉시 승인 직업이면 바로 적용
-    CP.job=j.nm; CP.job_salary=j.sal||0; CP.pendingJob=null; CP.pendingJobId=null;
+    // 선생님이거나 즉시 승인 직업이면 바로 적용 + 권한 즉시 갱신
+    CP.job=j.nm; CP.job_salary=j.sal||0; CP.pendingJob=null;
+    CP.jobPerms=j.perms||[]; // ← 권한 즉시 적용
     if(SB&&CU) sbSave(SB.from('profiles').update({job:j.nm,job_salary:j.sal||0,pending_job:null}).eq('id',CU.id),'직업 저장');
     loadJobs();
     toast(j.nm+' 직업 적용됨 ✅','s');
@@ -4156,12 +4159,16 @@ async function approveJobApp(stuId){
   const jobPerms=j?.perms||[];
   s.job=jobNm; s.job_salary=jobSal; s.perms=jobPerms; delete s.pendingJob;
   toast(`✅ ${s.nm}의 직업 "${jobNm}" 승인됨`,'s');
-  if(SB&&s.id&&!s.id.startsWith('s')&&CP?.id!=='demo'&&!CP?._isGuest){
+  if(SB&&s.id&&!s.id.startsWith('s')){
     await sbSave(SB.from('profiles').update({
       job:jobNm,
       job_salary:jobSal,
       pending_job:null
     }).eq('id',stuId),'직업 승인 저장');
+  }
+  // 만약 자신의 직업 승인이면 CP도 즉시 갱신
+  if(CU&&stuId===CU.id){
+    CP.job=jobNm; CP.job_salary=jobSal; CP.pendingJob=null; CP.jobPerms=jobPerms;
   }
   // 배지 업데이트 및 탭 새로고침
   const pendingCount=DSTU.filter(x=>x.pendingJob).length;
@@ -4176,7 +4183,7 @@ async function rejectJobApp(stuId){
   const jobNm=s.pendingJob||'직업';
   delete s.pendingJob;
   toast(`❌ ${s.nm}의 "${jobNm}" 신청 거절됨`,'i');
-  if(SB&&s.id&&!s.id.startsWith('s')&&CP?.id!=='demo'&&!CP?._isGuest){
+  if(SB&&s.id&&!s.id.startsWith('s')){
     await sbSave(SB.from('profiles').update({pending_job:null}).eq('id',stuId),'직업 거부 저장');
   }
   const pendingCount=DSTU.filter(x=>x.pendingJob).length;
@@ -6658,7 +6665,7 @@ function renderDevPlugins(){document.getElementById('dev-body').innerHTML=`<div 
 let _delCb=null;
 function confirmDel(msg,cb){document.getElementById('del-msg').textContent=msg;_delCb=cb;openMod('md-confirm-del');}
 function doDel(){closeMod('md-confirm-del');_delCb?.();_delCb=null;}
-function rmPlugin(id){confirmDel('이 플러그인을 삭제할까요? 되돌릴 수 없어요.',()=>{pluginData=pluginData.filter(p=>p.id!==id);renderDevPlugins();toast('삭제','i');});}
+function rmPlugin(id){confirmDel('이 플러그인을 삭제할까요? 되돌릴 수 없어요.',()=>{pluginData=pluginData.filter(p=>String(p.id)!==String(id));renderDevPlugins();toast('삭제','i');});}
 
 /* ===========================================
    COMMUNITY
@@ -7087,9 +7094,8 @@ function toggleLike(id){
   // UUID 형식이면 DB 저장 (숫자 로컬 ID 제외)
   const isUUID=String(id).length>20&&String(id).includes('-');
   if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest&&isUUID){
-    // board_posts.likes 컬럼 업데이트 (항상)
-    SB.from('board_posts').update({likes:JSON.stringify(p.likes)}).eq('id',String(id)).then(()=>{},e=>console.error('[toggleLike]',e));
-    // board_post_likes 테이블에도 저장
+    // board_posts.likes 컬럼도 업데이트 (재로드 시 반영)
+    SB.from('board_posts').update({likes:JSON.stringify(p.likes)}).eq('id',String(id)).then(()=>{},()=>{});
     if(isNowLiked){
       SB.from('board_post_likes').upsert({post_id:String(id),user_name:nm},{onConflict:'post_id,user_name'}).then(()=>{},()=>{});
     } else {
@@ -7118,8 +7124,7 @@ function submitComment(id){
   }
   const isUUID=String(id).length>20&&String(id).includes('-');
   if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest&&isUUID){
-    SB.from('board_post_comments').insert({post_id:String(id),author_name:CP.name||'나',content:txt})
-      .then(()=>{},e=>console.error('[submitComment]',e));
+    SB.from('board_post_comments').insert({post_id:String(id),author_name:CP.name||'나',content:txt,class_id:CP.class_id||null}).then(()=>{},()=>{});
   }
   toast('댓글 등록!','s');
 }
@@ -7607,22 +7612,6 @@ async function loadNationalPosts(){
           if(profiles)profiles.forEach(p=>{profileMap[p.id]=p;});
         }catch(_){}
       }
-      // 댓글 일괄 로드
-      const postIds=data.map(p=>p.id);
-      let commentMap={};
-      if(postIds.length){
-        try{
-          const{data:comments}=await SB.from('board_post_comments').select('post_id,author_name,content,created_at').in('post_id',postIds).order('created_at',{ascending:true});
-          if(comments){
-            comments.forEach(c=>{
-              if(!commentMap[c.post_id])commentMap[c.post_id]=[];
-              const now=new Date(c.created_at);
-              const ts=`${now.getHours()>=12?'오후':'오전'} ${now.getHours()>12?now.getHours()-12:now.getHours()||12}:${String(now.getMinutes()).padStart(2,'0')}`;
-              commentMap[c.post_id].push({author:c.author_name||'익명',txt:c.content||'',ts});
-            });
-          }
-        }catch(_){}
-      }
       nationalPosts=data.map(p=>{
         const prof=profileMap[p.author_id]||{};
         const av=AVATARS?.find(a=>a.id===prof.equipped_avatar);
@@ -7637,7 +7626,7 @@ async function loadNationalPosts(){
           avatarIco:av?.ico||null,
           ts:new Date(p.created_at).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}),
           likes:(()=>{try{return Array.isArray(p.likes)?p.likes:(p.likes?JSON.parse(p.likes):[]);}catch(_){return[];}})(),
-          comments:commentMap[p.id]||[]
+          comments:[]
         };
       });
     } else {
@@ -7692,30 +7681,13 @@ function commTab(tab,btn){
                 if(profiles)profiles.forEach(p=>{profileMap[p.id]=p;});
               }catch(_){}
             }
-            // 댓글 일괄 로드
-            const postIds=data.map(p=>p.id);
-            let commentMap={};
-            if(postIds.length){
-              try{
-                const{data:comments}=await SB.from('board_post_comments').select('post_id,author_name,content,created_at').in('post_id',postIds).order('created_at',{ascending:true});
-                if(comments){
-                  comments.forEach(c=>{
-                    if(!commentMap[c.post_id])commentMap[c.post_id]=[];
-                    const now=new Date(c.created_at);
-                    const ts=`${now.getHours()>=12?'오후':'오전'} ${now.getHours()>12?now.getHours()-12:now.getHours()||12}:${String(now.getMinutes()).padStart(2,'0')}`;
-                    commentMap[c.post_id].push({author:c.author_name||'익명',txt:c.content||'',ts});
-                  });
-                }
-              }catch(_){}
-            }
             teacherPosts=data.map(p=>{
               const prof=profileMap[p.author_id]||{};
               const av=AVATARS?.find(a=>a.id===prof.equipped_avatar);
               return {id:p.id,author:p.author_name||'선생님',author_id:p.author_id,school:(p.school||'').replace(/^__teacher__:/,''),col:'#1d4ed8',content:p.content||'',
                 avatarUrl:prof.custom_avatar_url||null,avatarIco:av?.ico||null,
                 ts:new Date(p.created_at).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}),
-                likes:(()=>{try{return Array.isArray(p.likes)?p.likes:(p.likes?JSON.parse(p.likes):[]);}catch(_){return[];}})(),
-                comments:commentMap[p.id]||[]};
+                likes:(()=>{try{return Array.isArray(p.likes)?p.likes:(p.likes?JSON.parse(p.likes):[]);}catch(_){return[];}})(),comments:[]};
             });
             const body2=document.getElementById('comm-body');
             if(body2)renderNationalTeacherComm(body2);
@@ -7823,20 +7795,21 @@ function toggleNLike(id){
   const p=nationalPosts.find(p=>String(p.id)===String(id));if(!p)return;
   const nm=CP.name||'나';
   const idx=p.likes.indexOf(nm);
-  const isNowLiked=idx<0;
   if(idx>=0)p.likes.splice(idx,1);else p.likes.push(nm);
   const el=document.getElementById('np-'+id);
   if(el){const newHtml=renderNationalPost(p);const tmp=document.createElement('div');tmp.innerHTML=newHtml;el.replaceWith(tmp.firstChild);}
-  const isUUID=String(p.id).length>20&&String(p.id).includes('-');
-  if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest&&isUUID){
-    // board_posts.likes 컬럼 업데이트
-    SB.from('board_posts').update({likes:JSON.stringify(p.likes)}).eq('id',String(p.id))
-      .then(()=>{},e=>console.error('[toggleNLike]',e));
-    // board_post_likes 테이블에도 저장
-    if(isNowLiked){
-      SB.from('board_post_likes').upsert({post_id:String(p.id),user_name:nm},{onConflict:'post_id,user_name'}).then(()=>{},()=>{});
-    } else {
-      SB.from('board_post_likes').delete().eq('post_id',String(p.id)).eq('user_name',nm).then(()=>{},()=>{});
+  if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest&&p.id){
+    const isLiked=p.likes.includes(nm);
+    const isUUID=String(p.id).length>20&&String(p.id).includes('-');
+    // board_posts.likes 컬럼 업데이트 (로드 시 사용)
+    if(isUUID) SB.from('board_posts').update({likes:JSON.stringify(p.likes)}).eq('id',String(p.id)).then(()=>{},()=>{});
+    // board_post_likes 테이블에도 저장 (중복 방지용)
+    if(isUUID){
+      if(isLiked){
+        SB.from('board_post_likes').upsert({post_id:String(p.id),user_name:nm},{onConflict:'post_id,user_name'}).then(()=>{},()=>{});
+      } else {
+        SB.from('board_post_likes').delete().eq('post_id',String(p.id)).eq('user_name',nm).then(()=>{},()=>{});
+      }
     }
   }
 }
@@ -7852,10 +7825,9 @@ function submitNComment(id){
   const el=document.getElementById('np-'+id);
   if(el){const newHtml=renderNationalPost(p);const tmp=document.createElement('div');tmp.innerHTML=newHtml;el.replaceWith(tmp.firstChild);}
   toast('💬 댓글 등록!','s');
-  const isUUID=String(p.id).length>20&&String(p.id).includes('-');
-  if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest&&isUUID){
-    SB.from('board_post_comments').insert({post_id:String(p.id),author_name:CP.name||'익명',content:txt})
-      .then(()=>{},e=>console.error('[submitNComment]',e));
+  if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest&&p.id){
+    const isUUID=String(p.id).length>20&&String(p.id).includes('-');
+    if(isUUID) SB.from('board_post_comments').insert({post_id:String(p.id),author_name:CP.name||'익명',content:txt}).then(()=>{},()=>{});
   }
 }
 function deleteNPost(id){
@@ -8039,17 +8011,16 @@ function pedSave(){
   }
   savePluginStorage();
   closeMod('md-plugin-edit');
-  commTab('mine',document.querySelectorAll('#comm-tabs .admtab')[1]);
+  // 내 플러그인 탭으로 이동
+  const mineBtn=document.querySelector('#comm-tabs .admtab[onclick*="mine"]');
+  commTab('mine', mineBtn||null);
 }
 
 function deleteUserPlugin(id){
-  const sid=String(id);
-  const p=userPlugins.find(p=>String(p.id)===sid);
+  const p=userPlugins.find(p=>String(p.id)===String(id));
   if(!p||!confirm(`"${p.nm}"을 삭제할까요?`))return;
-  userPlugins=userPlugins.filter(p=>String(p.id)!==sid);
-  const pi=PLUGIN_DEFS.findIndex(p=>String(p.id)===sid);
-  if(pi>=0)PLUGIN_DEFS.splice(pi,1);
-  installedSet.delete(sid);
+  userPlugins=userPlugins.filter(p=>String(p.id)!==String(id));
+  installedSet.delete(String(id));
   savePluginStorage();
   renderMyPlugins();
   toast('삭제됐어요','i');
@@ -8119,13 +8090,13 @@ function runPluginCode(code){
 }
 
 function runPlugin(id){
-  const sid=String(id);
   // 내장 플러그인
-  const builtin=PLUGIN_DEFS.find(p=>String(p.id)===sid);
+  const builtin=PLUGIN_DEFS.find(p=>String(p.id)===String(id));
   if(builtin?.code){runPluginCode(builtin.code);if(builtin._user){builtin.dl=(builtin.dl||0)+1;savePluginStorage();}return;}
   // 사용자 플러그인
-  const up=userPlugins.find(p=>String(p.id)===sid);
+  const up=userPlugins.find(p=>String(p.id)===String(id));
   if(up?.code){up.dl=(up.dl||0)+1;savePluginStorage();runPluginCode(up.code);}
+  else toast('플러그인 코드가 없어요','e');
 }
 
 function toggleInstall(id){
@@ -8247,7 +8218,7 @@ function updateEdPluginList(){
   const sec=document.getElementById('ed-plugin-sec');
   const list=document.getElementById('ed-plugin-list');
   if(!sec||!list)return;
-  const installed=getAllPlugins().filter(p=>installedSet.has(String(p.id)));
+  const installed=getAllPlugins().filter(p=>installedSet.has(p.id));
   if(!installed.length){sec.style.display='none';return;}
   sec.style.display='';
   const builtinTypeMap={1:'dice',2:'quiz',3:'poll',6:'notice',7:'lotto',8:'timer'};
@@ -8483,22 +8454,6 @@ async function loadBoardData(){
           if(profiles)profiles.forEach(p=>{profileMap[p.id]=p;});
         }catch(_){}
       }
-      // 댓글 일괄 로드
-      const postIds=data.map(p=>p.id);
-      let commentMap={};
-      if(postIds.length){
-        try{
-          const{data:comments}=await SB.from('board_post_comments').select('post_id,author_name,content,created_at').in('post_id',postIds).order('created_at',{ascending:true});
-          if(comments){
-            comments.forEach(c=>{
-              if(!commentMap[c.post_id])commentMap[c.post_id]=[];
-              const now=new Date(c.created_at);
-              const ts=`${now.getHours()>=12?'오후':'오전'} ${now.getHours()>12?now.getHours()-12:now.getHours()||12}:${String(now.getMinutes()).padStart(2,'0')}`;
-              commentMap[c.post_id].push({author:c.author_name||'익명',txt:c.content||'',ts});
-            });
-          }
-        }catch(_){}
-      }
       boardPosts=data.map(p=>{
         const prof=profileMap[p.author_id]||{};
         const av=AVATARS?.find(a=>a.id===prof.equipped_avatar);
@@ -8511,7 +8466,7 @@ async function loadBoardData(){
           avatarIco:av?.ico||null,
           txt:p.content||'',img:p.image_url||null,
           ts:new Date(p.created_at).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}),
-          likes,comments:commentMap[p.id]||[],_dbId:p.id,_uid:p.author_id
+          likes,comments:[],_dbId:p.id,_uid:p.author_id
         };
       });
     }
@@ -9606,12 +9561,14 @@ function jobsTab(tab,btn){
         </div>`).join('')}
     </div>`;
   } else if(tab==='my'){
-    const curJob=allJobs.find(j=>j.nm===CP?.job);const myPerms=curJob?.perms||[];
+    const curJob=allJobs.find(j=>j.nm===CP?.job);
+    // CP.jobPerms 우선, fallback으로 curJob.perms 사용
+    const myPerms=CP.jobPerms?.length?CP.jobPerms:(curJob?.perms||[]);
     // 권한별 바로가기 버튼 생성
     const permActions=[];
-    if(myPerms.includes('shop_manage')||myPerms.includes('상점 관리')) permActions.push(`<button class="btn btn-p btn-sm" onclick="goPage('pg-shop');shopTab('items',null)">🏪 상점 관리</button>`);
-    if(myPerms.includes('공지 작성')) permActions.push(`<button class="btn btn-p btn-sm" onclick="goPage('pg-admin');admTab('notice',null)">📢 공지 작성</button>`);
-    if(myPerms.includes('좌석 배치')) permActions.push(`<button class="btn btn-p btn-sm" onclick="goPage('pg-admin');admTab('seating',null)">💺 자리 배치</button>`);
+    if(myPerms.some(p=>p==='shop_manage'||p==='상점 관리')) permActions.push(`<button class="btn btn-p btn-sm" onclick="goPage('pg-shop');shopTab('items',null)">🏪 상점 관리</button>`);
+    if(myPerms.some(p=>p==='announce'||p==='공지 작성')) permActions.push(`<button class="btn btn-p btn-sm" onclick="goPage('pg-admin');admTab('notice',null)">📢 공지 작성</button>`);
+    if(myPerms.some(p=>p==='seat_manage'||p==='자리 배치'||p==='좌석 배치')) permActions.push(`<button class="btn btn-p btn-sm" onclick="goPage('pg-admin');admTab('seating',null)">💺 자리 배치</button>`);
     el.innerHTML=`<div style="max-width:100%">${curJob?`
       <div style="background:linear-gradient(135deg,#eff6ff,#dbeafe);border:1.5px solid #bfdbfe;border-radius:18px;padding:20px;margin-bottom:20px;display:flex;align-items:center;gap:16px">
         <div style="width:56px;height:56px;border-radius:16px;background:linear-gradient(135deg,#1d4ed8,#3b82f6);display:flex;align-items:center;justify-content:center;font-size:26px;flex-shrink:0">${curJob.ico&&curJob.ico.startsWith('<')?curJob.ico:curJob.ico||'💼'}</div>
@@ -9807,8 +9764,8 @@ function openPluginEditor(editId){
       snippetBar.appendChild(btn);
     });
   }
-  pedEditId=editId!=null?String(editId):null;
-  const p=pedEditId?userPlugins.find(p=>String(p.id)===pedEditId):null;
+  pedEditId=editId||null;
+  const p=editId?userPlugins.find(p=>p.id===editId):null;
   const tab=document.getElementById('ped-title-tab');
   if(tab)tab.textContent=p?('수정: '+p.nm):'새 플러그인';
   document.getElementById('ped-nm').value=p?.nm||'';
@@ -9895,7 +9852,7 @@ function renderNationalTeacherComm(body){
 }
 function renderTeacherPost(p){
   const isLiked=p.likes.includes(CP?.name||'나');
-  const isMyPost=(p.author_id===CU?.id)||(p.author===CP?.name);
+  const isMyPost=(p.author_id===CU?.id);
   const avatarHtml=isMyPost&&CP.customAvatarImg
     ?`<img src="${CP.customAvatarImg}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;flex-shrink:0" onerror="this.style.display='none'">`
     :p.avatarUrl
@@ -9903,7 +9860,6 @@ function renderTeacherPost(p){
       :p.avatarIco
         ?`<div style="width:40px;height:40px;border-radius:50%;background:#1d4ed8;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">${p.avatarIco}</div>`
         :`<div style="width:40px;height:40px;border-radius:50%;background:#1d4ed8;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:900;color:#fff;flex-shrink:0">${(p.author||'?')[0]}</div>`;
-  const comments=p.comments||[];
   return `<div id="tp-${p.id}" style="background:#fff;border:1.5px solid #eef2f8;border-radius:18px;margin-bottom:14px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.05)">
     <div style="padding:14px 16px 10px;display:flex;align-items:center;gap:10px">
       ${avatarHtml}
@@ -9911,50 +9867,16 @@ function renderTeacherPost(p){
         <div style="font-size:14px;font-weight:800;color:#0f172a">${escHtml(p.author)}</div>
         <div style="font-size:11.5px;color:#94a3b8">${escHtml(p.school||'')} · 선생님 · ${p.ts}</div>
       </div>
-      ${isMyPost?`<button onclick="deleteTeacherPost('${p.id}')" style="padding:5px;border:none;background:none;cursor:pointer;color:#94a3b8;border-radius:8px"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 3.5h10M5 3.5V2.5a.5.5 0 01.5-.5h3a.5.5 0 01.5.5v1M11 3.5l-.5 8H3.5l-.5-8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button>`:''}
+      ${p.author===CP?.name?`<button onclick="deleteTeacherPost('${p.id}')" style="padding:5px;border:none;background:none;cursor:pointer;color:#94a3b8;border-radius:8px"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 3.5h10M5 3.5V2.5a.5.5 0 01.5-.5h3a.5.5 0 01.5.5v1M11 3.5l-.5 8H3.5l-.5-8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button>`:''}
     </div>
     <div style="padding:0 16px 12px;font-size:14px;color:#374151;line-height:1.65;white-space:pre-wrap">${escHtml(p.content)}</div>
-    ${comments.length?`<div style="padding:0 16px 10px;display:flex;flex-direction:column;gap:6px">
-      ${comments.map(c=>`<div style="background:#f8faff;border-radius:10px;padding:8px 12px;display:flex;gap:8px">
-        <span style="font-size:12px;font-weight:700;color:#1d4ed8">${escHtml(c.author)}</span>
-        <span style="font-size:12px;color:#374151;flex:1">${escHtml(c.txt)}</span>
-        <span style="font-size:11px;color:#94a3b8;flex-shrink:0">${c.ts||''}</span>
-      </div>`).join('')}
-    </div>`:''}
-    <div style="padding:10px 16px;border-top:1px solid #f1f5f9;display:flex;gap:10px;align-items:center">
+    <div style="padding:10px 16px;border-top:1px solid #f1f5f9;display:flex;gap:10px">
       <button onclick="toggleTeacherLike('${p.id}')" style="display:flex;align-items:center;gap:5px;padding:6px 12px;border:1.5px solid ${isLiked?'#ec4899':'#e2e8f0'};background:${isLiked?'#fff0f6':'#fff'};border-radius:99px;cursor:pointer;font-size:13px;font-weight:700;color:${isLiked?'#ec4899':'#64748b'};transition:.15s">
         <svg width="14" height="14" viewBox="0 0 14 14" fill="${isLiked?'#ec4899':'none'}"><path d="M7 12S1.5 8.5 1.5 5C1.5 3.2 3 1.5 4.8 1.5c1 0 1.9.5 2.5 1.3.6-.8 1.5-1.3 2.5-1.3C11.6 1.5 12.5 3.2 12.5 5 12.5 8.5 7 12 7 12z" stroke="${isLiked?'#ec4899':'currentColor'}" stroke-width="1.4"/></svg>
         ${p.likes.length||''}
       </button>
-      <button onclick="focusTComment('${p.id}')" style="display:flex;align-items:center;gap:5px;padding:6px 12px;border:1.5px solid #e2e8f0;background:#fff;border-radius:99px;cursor:pointer;font-size:13px;font-weight:700;color:#64748b;transition:.15s">
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 2h10v8H7.5L5 12.5V10H2V2z" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        ${comments.length||''}
-      </button>
-    </div>
-    <div style="padding:0 16px 12px;display:flex;gap:8px;align-items:center">
-      <input id="tc-input-${p.id}" class="fi" placeholder="댓글을 입력하세요..." style="flex:1;height:36px;font-size:13px;padding:4px 12px" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();submitTComment('${p.id}');}">
-      <button onclick="submitTComment('${p.id}')" style="padding:6px 14px;background:#1d4ed8;color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;flex-shrink:0">등록</button>
     </div>
   </div>`;
-}
-function focusTComment(id){document.getElementById('tc-input-'+id)?.focus();}
-function submitTComment(id){
-  const inp=document.getElementById('tc-input-'+id);
-  const txt=(inp?.value||'').trim();if(!txt)return;
-  const p=teacherPosts.find(p=>String(p.id)===String(id));if(!p)return;
-  if(!p.comments)p.comments=[];
-  const now=new Date();
-  const ts=`${now.getHours()>=12?'오후':'오전'} ${now.getHours()>12?now.getHours()-12:now.getHours()||12}:${String(now.getMinutes()).padStart(2,'0')}`;
-  p.comments.push({author:CP?.name||'익명',txt,ts});
-  inp.value='';
-  const el=document.getElementById('tp-'+id);
-  if(el){const tmp=document.createElement('div');tmp.innerHTML=renderTeacherPost(p);el.replaceWith(tmp.firstChild);}
-  toast('💬 댓글 등록!','s');
-  const isUUID=String(p.id).length>20&&String(p.id).includes('-');
-  if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest&&isUUID){
-    SB.from('board_post_comments').insert({post_id:String(p.id),author_name:CP?.name||'익명',content:txt})
-      .then(()=>{},e=>console.error('[submitTComment]',e));
-  }
 }
 function openNationalPostForm(type){
   if(CP?.id==='demo'||CP?._isGuest){toast('체험 계정은 전국 커뮤니티에 글을 쓸 수 없어요','e');return;}
@@ -10046,16 +9968,15 @@ function toggleTeacherLike(id){
   if(idx>=0)p.likes.splice(idx,1);else p.likes.push(nm);
   const el=document.getElementById('tp-'+id);
   if(el){const tmp=document.createElement('div');tmp.innerHTML=renderTeacherPost(p);el.replaceWith(tmp.firstChild);}
-  const isUUID=String(p.id).length>20&&String(p.id).includes('-');
-  if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest&&isUUID){
-    // board_posts.likes 컬럼 업데이트
-    SB.from('board_posts').update({likes:JSON.stringify(p.likes)}).eq('id',String(p.id))
-      .then(()=>{},e=>console.error('[toggleTeacherLike]',e));
-    // board_post_likes 테이블에도 저장
-    if(isNowLiked){
-      SB.from('board_post_likes').upsert({post_id:String(p.id),user_name:nm},{onConflict:'post_id,user_name'}).then(()=>{},()=>{});
-    } else {
-      SB.from('board_post_likes').delete().eq('post_id',String(p.id)).eq('user_name',nm).then(()=>{},()=>{});
+  if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest){
+    const isUUID=String(p.id).length>20&&String(p.id).includes('-');
+    if(isUUID){
+      SB.from('board_posts').update({likes:JSON.stringify(p.likes)}).eq('id',String(p.id)).then(()=>{},()=>{});
+      if(isNowLiked){
+        SB.from('board_post_likes').upsert({post_id:String(p.id),user_name:nm},{onConflict:'post_id,user_name'}).then(()=>{},()=>{});
+      } else {
+        SB.from('board_post_likes').delete().eq('post_id',String(p.id)).eq('user_name',nm).then(()=>{},()=>{});
+      }
     }
   }
 }

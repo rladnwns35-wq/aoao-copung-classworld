@@ -2834,6 +2834,25 @@ function _staffStudentGrid(students,onClickFn){
   </div>`;
 }
 
+// 직원 권한 공용 모달 — body HTML 넣고 optional onMount 콜백
+function openStaffModal(title,bodyHtml,onMount){
+  const id='md-staff-action';
+  let el=document.getElementById(id);
+  if(el)el.remove();
+  document.body.insertAdjacentHTML('beforeend',`
+  <div class="ov" id="${id}">
+    <div class="modal" style="width:min(720px,96vw);max-height:90vh;overflow-y:auto">
+      <div class="mhdr">
+        <div class="mtitle">${escHtml(title)}</div>
+        <button class="mclose" onclick="closeMod('${id}')"><svg viewBox="0 0 9 9" fill="none" width="9" height="9"><path d="M1 1l7 7M8 1L1 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
+      </div>
+      <div id="staff-modal-body" style="padding:4px 2px">${bodyHtml}</div>
+    </div>
+  </div>`);
+  openMod(id);
+  if(typeof onMount==='function')setTimeout(()=>onMount(document.getElementById('staff-modal-body')),30);
+}
+
 /* === 공지 작성 === */
 async function openStaffNotice(){
   if(!hasJobPerm('announce')){toast('💼 "공지 작성" 권한이 없어요','e');return;}
@@ -9247,9 +9266,9 @@ function openProfile(targetCP){
         <span class="chip ${roleColor}">${roleLabel}</span>
         ${p.job&&p.job!=='무직'?`<span class="chip chip-a">${p.job}</span>`:''}
       </div>
-      ${isMe?`<div style="display:flex;align-items:stretch;gap:8px;margin:8px 0 2px">
-        <textarea id="bio-input" class="fi" rows="2" style="resize:none;font-size:13px;padding:8px 12px;flex:1;min-height:56px;height:56px;max-height:80px;line-height:1.5;box-sizing:border-box" placeholder="소개를 입력하세요...">${escHtml(p.bio||'')}</textarea>
-        <button class="btn btn-p btn-sm" onclick="saveBio()" style="height:56px;min-height:56px;padding:0 14px;flex-shrink:0;white-space:nowrap;font-size:13px;align-self:stretch;box-sizing:border-box">저장</button>
+      ${isMe?`<div style="display:flex;align-items:center;gap:6px;margin:8px 0 2px">
+        <input id="bio-input" class="fi" type="text" maxlength="80" style="font-size:13px;padding:0 12px;flex:1;height:38px;line-height:38px;box-sizing:border-box" placeholder="소개를 입력하세요..." value="${escHtml(p.bio||'')}">
+        <button class="btn btn-p btn-sm" onclick="saveBio()" style="height:38px;padding:0 14px;flex-shrink:0;white-space:nowrap;font-size:13px;box-sizing:border-box">저장</button>
       </div>`:`<div class="prof-bio">${escHtml(p.bio||'소개가 없어요 👋')}</div>`}
       <div class="prof-stats">
         <div class="prof-stat">

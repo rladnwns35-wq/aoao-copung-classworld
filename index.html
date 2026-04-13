@@ -2399,6 +2399,28 @@ function initRealtimeSubscriptions(){
     }).subscribe();
   _realtimeChannels.push(shopCh);
 
+  // 5-b. classes.settings 실시간 (플러그인 스토어 공유)
+  if(CP.class_id){
+    const clsCh=SB.channel('class_settings_'+CP.class_id)
+      .on('postgres_changes',{event:'UPDATE',schema:'public',table:'classes',filter:'id=eq.'+CP.class_id},(payload)=>{
+        const s=payload.new?.settings;
+        if(!s)return;
+        // 플러그인 스토어 갱신
+        if(Array.isArray(s.userPlugins)){
+          classStorePlugins=s.userPlugins;
+          window._classSettings=Object.assign(window._classSettings||{},{userPlugins:s.userPlugins});
+          // 스토어 탭이 열려 있으면 즉시 재렌더
+          if(document.getElementById('pg-comm')?.classList.contains('on')){
+            const onTab=document.querySelector('#comm-tabs .admtab.on');
+            if(onTab&&onTab.getAttribute('onclick')?.includes("'store'")){
+              if(typeof renderStore==='function')renderStore(getAllPlugins());
+            }
+          }
+        }
+      }).subscribe();
+    _realtimeChannels.push(clsCh);
+  }
+
   // 6. board_posts 실시간 (학급 게시판)
   if(CP.class_id){
     const boardCh=SB.channel('board_posts_'+CP.class_id)
@@ -8156,32 +8178,33 @@ async function loadPluginsFromSB(){
 let pedEditId=null; // 편집 중인 플러그인 id
 
 async function savePluginStorage(){
-  // localStorage 저장 안 함 — 모든 데이터는 Supabase에서만 관리
   if(!SB||!CU||CP?.id==='demo'||CP?._isGuest)return;
-  // 1) 본인 프로필에 저장 (내 플러그인 + 설치 목록)
+  // 1) 본인 프로필에 저장
   try{
-    await SB.from('profiles').update({
+    const{error:e1}=await SB.from('profiles').update({
       user_plugins:userPlugins,
       installed_plugins:[...installedSet]
     }).eq('id',CU.id);
-  }catch(e){console.error('[savePluginStorage profiles]',e);}
-  // 2) 학급 공유 스토어에 merge — 본인 플러그인을 author_uid로 식별
+    if(e1){console.error('[savePluginStorage profiles error]',e1);toast('플러그인 저장 실패: '+e1.message,'e');}
+  }catch(e){console.error('[savePluginStorage profiles]',e);toast('플러그인 저장 실패','e');}
+  // 2) 학급 공유 스토어에 merge
   if(CP?.class_id){
     try{
-      const{data:res}=await SB.from('classes').select('settings').eq('id',CP.class_id).maybeSingle();
+      const{data:res,error:eFetch}=await SB.from('classes').select('settings').eq('id',CP.class_id).maybeSingle();
+      if(eFetch){console.error('[savePluginStorage fetch]',eFetch);toast('학급 설정 읽기 실패: '+eFetch.message,'e');return;}
       const cur=res?.settings||{};
       const pool=Array.isArray(cur.userPlugins)?cur.userPlugins.slice():[];
-      // 본인 플러그인에 author_uid 부여
       const mine=userPlugins.map(p=>({...p,author_uid:CU.id,by:p.by||CP.name||'사용자'}));
-      // pool에서 본인 것 제거 (author_uid로 식별) 후 최신 본인 것 추가
       const others=pool.filter(p=>p.author_uid!==CU.id);
       const mergedPool=[...others,...mine];
       const merged={...cur,userPlugins:mergedPool};
-      await SB.from('classes').update({settings:merged}).eq('id',CP.class_id);
-      // 로컬 캐시 즉시 동기화 (비동기 .then() 안이 아니라 여기서)
+      const{error:eUpd}=await SB.from('classes').update({settings:merged}).eq('id',CP.class_id);
+      if(eUpd){console.error('[savePluginStorage update]',eUpd);toast('학급 스토어 공유 실패: '+eUpd.message,'e');return;}
+      // 로컬 캐시 즉시 동기화
       classStorePlugins=mergedPool;
       window._classSettings=Object.assign(window._classSettings||{},{userPlugins:mergedPool});
-    }catch(e){console.error('[savePluginStorage classes]',e);}
+      console.log('[savePluginStorage] 학급 스토어 공유 완료:',mergedPool.length,'개');
+    }catch(e){console.error('[savePluginStorage classes]',e);toast('학급 스토어 저장 실패','e');}
   }
 }
 
@@ -8327,10 +8350,13 @@ function commTab(tab,btn){
   }
   if(tab==='store'){
     acts.innerHTML=`<div class="srch"><svg class="srch-ic" width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="5.5" cy="5.5" r="4" stroke="currentColor" stroke-width="1.4"/><path d="M9 9l3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><input class="srch-in" id="plg-srch" placeholder="플러그인 검색..." oninput="filterPlugins(this.value)"></div>`;
-    renderStore(getAllPlugins());
+    body.innerHTML='<div class="empty" style="padding:40px"><div style="width:32px;height:32px;border:3px solid #dbeafe;border-top-color:#1d4ed8;border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 12px"></div><div class="empty-t">플러그인 로드 중...</div></div>';
+    // 항상 최신 fetch 후 렌더 (다른 사람이 만든 것까지)
+    loadPluginsFromSB().then(()=>renderStore(getAllPlugins()));
   } else if(tab==='mine'){
     acts.innerHTML='<button class="btn btn-p btn-sm" onclick="openPluginEditor()">새 플러그인 만들기</button>';
-    renderMyPlugins();
+    body.innerHTML='<div class="empty" style="padding:40px"><div style="width:32px;height:32px;border:3px solid #dbeafe;border-top-color:#1d4ed8;border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 12px"></div><div class="empty-t">로드 중...</div></div>';
+    loadPluginsFromSB().then(()=>renderMyPlugins());
   } else if(tab==='create'){
     acts.innerHTML='';
     body.innerHTML=''; // openPluginEditor가 모달로 처리

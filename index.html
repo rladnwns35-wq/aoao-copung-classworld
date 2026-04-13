@@ -575,13 +575,51 @@ hr.div{border:none;border-top:1px solid #f1f5f9;margin:16px 0;}
 .blk-t{font-size:18px;font-weight:800;margin:14px 0 5px;}
 .blk-s{font-size:12.5px;color:var(--text3);}
 
-/* ─── EMPTY STATE ─────────────────────────────────── */
-.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:56px 24px;text-align:center;min-height:220px;}
-.empty-ico-wrap{width:72px;height:72px;border-radius:20px;background:linear-gradient(135deg,var(--blue6),var(--blue5));display:flex;align-items:center;justify-content:center;margin-bottom:16px;box-shadow:0 4px 20px rgba(29,78,216,.1);}
-.empty-ico-wrap svg{opacity:.6;}
-.empty svg{opacity:.25;margin-bottom:14px;}
-.empty-t{font-size:15px;font-weight:800;color:var(--text2);margin-bottom:4px;}
-.empty-s{font-size:12.5px;color:var(--text4);line-height:1.6;max-width:240px;}
+/* ─── EMPTY STATE (전역) ──────────────────────────── */
+.empty{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:64px 24px;text-align:center;min-height:300px;
+  gap:4px;
+}
+/* 직접 자식 SVG는 둥근 그라데이션 박스로 자동 래핑 */
+.empty > svg:first-child{
+  width:44px;height:44px;padding:22px;
+  background:linear-gradient(135deg,#eff6ff,#dbeafe);
+  border-radius:24px;
+  box-shadow:0 8px 24px rgba(29,78,216,.12);
+  margin-bottom:18px;
+  color:#1d4ed8;
+  opacity:1;
+  box-sizing:content-box;
+}
+.empty-ico-wrap{
+  width:44px;height:44px;padding:22px;
+  border-radius:24px;
+  background:linear-gradient(135deg,#eff6ff,#dbeafe);
+  display:flex;align-items:center;justify-content:center;
+  margin-bottom:18px;
+  box-shadow:0 8px 24px rgba(29,78,216,.12);
+}
+.empty-ico-wrap svg{opacity:1;color:#1d4ed8;width:44px;height:44px;}
+.empty-t{
+  font-size:17px;font-weight:900;
+  color:#0f172a;letter-spacing:-.3px;
+  margin-bottom:6px;margin-top:0;
+}
+.empty-s{
+  font-size:13px;color:#64748b;
+  line-height:1.65;max-width:280px;
+  font-weight:500;
+}
+/* 컴팩트 변형 (모달 안/작은 영역에서) */
+.empty.empty-sm{padding:32px 20px;min-height:auto;}
+.empty.empty-sm > svg:first-child,.empty.empty-sm .empty-ico-wrap{
+  width:32px;height:32px;padding:16px;border-radius:18px;margin-bottom:12px;
+}
+.empty.empty-sm .empty-ico-wrap svg{width:32px;height:32px;}
+.empty.empty-sm .empty-t{font-size:14px;}
+.empty.empty-sm .empty-s{font-size:12px;}
+
 
 /* ─── USER ROW ────────────────────────────────────── */
 .urow{display:flex;align-items:center;gap:8px;padding:8px 13px;border-top:1px solid var(--border);transition:background var(--t);}

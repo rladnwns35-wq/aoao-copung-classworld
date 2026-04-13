@@ -8101,38 +8101,18 @@ toast('⏱ '+sec+'초 타이머 시작!','i');
 const iv=setInterval(()=>{r--;if(r<=0){clearInterval(iv);toast('⏱ 타이머 종료!','s');}},1000);`},
 ];
 
-// 사용자가 만든 플러그인 (로컬 저장) - try/catch: file:// Tracking Prevention 대응
+// 사용자가 만든 플러그인 — 전부 Supabase에서만 로드. localStorage 사용 안 함.
 let userPlugins=[];let installedSet=new Set();
-try{
-  const _up=localStorage.getItem('cw_user_plugins');
-  if(_up&&_up.trim()){
-    let _parsed=[];
-    try{_parsed=JSON.parse(_up)||[];}catch(_){
-      // JSON 깨짐 → 초기화
-      try{localStorage.removeItem('cw_user_plugins');}catch(_){}
-      _parsed=[];
-    }
-    userPlugins=_parsed.filter(p=>{
-      if(!p||typeof p!=='object')return false;
-      if(!p.nm||typeof p.nm!=='string')return false;
-      // 코드 없는 플러그인도 허용 (코드 없으면 실행만 불가)
-      return true;
-    });
-  }
-}catch(_){userPlugins=[];}
-try{
-  const _inst=localStorage.getItem('cw_installed');
-  if(_inst&&_inst.trim()){
-    let _parsed=[];
-    try{_parsed=JSON.parse(_inst)||[];}catch(_){_parsed=[];}
-    installedSet=new Set(_parsed.map(String));
-  }
-}catch(_){installedSet=new Set();}
-// Supabase에서 플러그인 데이터 로드 (비동기, 앱 로드 후 호출됨)
+// 이전 버전 localStorage 잔재 정리 (계정 간 오염 방지)
+try{localStorage.removeItem('cw_user_plugins');localStorage.removeItem('cw_installed');}catch(_){}
 // 학급 공유 플러그인 스토어 (다른 사람 것 포함)
 let classStorePlugins=[];
 
 async function loadPluginsFromSB(){
+  // 매 호출마다 초기화 — 계정 전환 시 이전 데이터 남지 않도록
+  userPlugins=[];
+  classStorePlugins=[];
+  installedSet=new Set();
   if(!SB||!CU||CP?.id==='demo'||CP?._isGuest)return;
   try{
     const validPlugin=(p)=>{
@@ -8151,18 +8131,24 @@ async function loadPluginsFromSB(){
         }
       }catch(_){classStorePlugins=[];}
     }
-    // 2) 본인 profiles에서 내 것만 (author_uid가 본인이거나 profiles에 저장된 것)
+    // 2) 본인 profiles에서 내 것만
     try{
       const{data:pf}=await SB.from('profiles').select('user_plugins,installed_plugins').eq('id',CU.id).maybeSingle();
       if(pf){
         if(Array.isArray(pf.user_plugins)){
           userPlugins=pf.user_plugins.filter(validPlugin);
-          try{localStorage.setItem('cw_user_plugins',JSON.stringify(userPlugins));}catch(_){}
+        } else {
+          userPlugins=[];
         }
         if(Array.isArray(pf.installed_plugins)){
           installedSet=new Set(pf.installed_plugins.map(String));
-          try{localStorage.setItem('cw_installed',JSON.stringify([...installedSet]));}catch(_){}
+        } else {
+          installedSet=new Set();
         }
+      } else {
+        // 새 계정: 완전 초기화
+        userPlugins=[];
+        installedSet=new Set();
       }
     }catch(_){}
   }catch(e){console.error('[loadPluginsFromSB]',e);}
@@ -8170,12 +8156,7 @@ async function loadPluginsFromSB(){
 let pedEditId=null; // 편집 중인 플러그인 id
 
 function savePluginStorage(){
-  try{
-    localStorage.setItem('cw_user_plugins',JSON.stringify(userPlugins));
-    localStorage.setItem('cw_installed',JSON.stringify([...installedSet]));
-  }catch(e){
-    try{localStorage.removeItem('cw_user_plugins');localStorage.removeItem('cw_installed');}catch(_){}
-  }
+  // localStorage 저장 안 함 — 모든 데이터는 Supabase에서만 관리
   // 본인 프로필에 저장 (내 플러그인 + 설치 목록)
   if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest){
     SB.from('profiles').update({

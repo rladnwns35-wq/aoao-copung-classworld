@@ -2093,22 +2093,28 @@ function guestLogin(type){
       if(CP.equippedBanner===undefined)CP.equippedBanner=null;
       if(!CP.bio)CP.bio='';
       if(!CP.account_number)CP.account_number=genAcc();
-      // 직업 권한(perms) 복원 — customJobs에서 현재 직업 찾아서 perms 로드
+      // 직업 권한(perms) 복원 — DB의 job_perms 컬럼 우선 사용
       if(CP.job&&CP.job!=='학생'){
-        const allJ=typeof getAllJobs==='function'?getAllJobs():[...DJOBS,...(customJobs||[]).map((j,i)=>({...j,id:'c'+i,custom:true}))];
-        const curJ=allJ.find(j=>j.nm===CP.job);
-        if(curJ)CP.jobPerms=curJ.perms||[];
-        else CP.jobPerms=[];
-        // 커스텀 직업이어서 아직 customJobs 로드 전일 경우, 클래스 settings 로드 후 재시도
-        if(!CP.jobPerms.length&&CP.class_id&&SB&&typeof mergeClassSettings==='function'){
-          SB.from('classes').select('settings').eq('id',CP.class_id).maybeSingle().then(function(res){
-            const s=res&&res.data&&res.data.settings;
-            if(s&&s.customJobs&&Array.isArray(s.customJobs)){
-              if(!customJobs||!customJobs.length) customJobs=s.customJobs;
-              const cj=s.customJobs.find(function(j){return j.nm===CP.job;});
-              if(cj) CP.jobPerms=cj.perms||[];
-            }
-          }).catch(function(){});
+        // 1순위: DB에 저장된 job_perms (가장 신뢰)
+        if(Array.isArray(CP.job_perms)&&CP.job_perms.length){
+          CP.jobPerms=CP.job_perms;
+        } else {
+          // 2순위: 메모리의 직업 정의에서 찾기
+          const allJ=typeof getAllJobs==='function'?getAllJobs():[...DJOBS,...(customJobs||[]).map((j,i)=>({...j,id:'c'+i,custom:true}))];
+          const curJ=allJ.find(j=>j.nm===CP.job);
+          if(curJ)CP.jobPerms=curJ.perms||[];
+          else CP.jobPerms=[];
+          // 3순위: settings에서 비동기 fallback
+          if(!CP.jobPerms.length&&CP.class_id&&SB&&typeof mergeClassSettings==='function'){
+            SB.from('classes').select('settings').eq('id',CP.class_id).maybeSingle().then(function(res){
+              const s=res&&res.data&&res.data.settings;
+              if(s&&s.customJobs&&Array.isArray(s.customJobs)){
+                if(!customJobs||!customJobs.length) customJobs=s.customJobs;
+                const cj=s.customJobs.find(function(j){return j.nm===CP.job;});
+                if(cj) CP.jobPerms=cj.perms||[];
+              }
+            }).catch(function(){});
+          }
         }
       } else {
         CP.jobPerms=[];
@@ -2214,21 +2220,25 @@ function initRealtimeSubscriptions(){
       if(d.job_salary!==undefined&&d.job_salary!==null)CP.job_salary=d.job_salary;
       CP.pending_job=d.pending_job||null;
       CP.pendingJob=d.pending_job||null;
-      // 직업 변경 시 권한(perms) 즉시 갱신
+      // 직업 변경 시 권한(perms) 즉시 갱신 — DB의 job_perms 우선
       if(d.job){
-        const allJ=typeof getAllJobs==='function'?getAllJobs():[...DJOBS,...(customJobs||[]).map((j,i)=>({...j,id:'c'+i,custom:true}))];
-        const curJ=allJ.find(j=>j.nm===d.job);
-        CP.jobPerms=curJ?.perms||[];
-        // 커스텀 직업이어서 perms 못 찾았으면 settings에서 재시도
-        if(!CP.jobPerms.length&&CP.class_id&&SB){
-          SB.from('classes').select('settings').eq('id',CP.class_id).maybeSingle().then(function(res){
-            const s=res&&res.data&&res.data.settings;
-            if(s&&s.customJobs){
-              if(!customJobs||!customJobs.length)customJobs=s.customJobs;
-              const cj=s.customJobs.find(function(j){return j.nm===d.job;});
-              if(cj)CP.jobPerms=cj.perms||[];
-            }
-          }).catch(function(){});
+        if(Array.isArray(d.job_perms)&&d.job_perms.length){
+          CP.jobPerms=d.job_perms;
+        } else {
+          const allJ=typeof getAllJobs==='function'?getAllJobs():[...DJOBS,...(customJobs||[]).map((j,i)=>({...j,id:'c'+i,custom:true}))];
+          const curJ=allJ.find(j=>j.nm===d.job);
+          CP.jobPerms=curJ?.perms||[];
+          // 커스텀 직업이어서 perms 못 찾았으면 settings에서 재시도
+          if(!CP.jobPerms.length&&CP.class_id&&SB){
+            SB.from('classes').select('settings').eq('id',CP.class_id).maybeSingle().then(function(res){
+              const s=res&&res.data&&res.data.settings;
+              if(s&&s.customJobs){
+                if(!customJobs||!customJobs.length)customJobs=s.customJobs;
+                const cj=s.customJobs.find(function(j){return j.nm===d.job;});
+                if(cj)CP.jobPerms=cj.perms||[];
+              }
+            }).catch(function(){});
+          }
         }
       }
       // 직업 승인됨 알림
@@ -4225,7 +4235,7 @@ function applyJob(id){
     CP.job=j.nm; CP.job_salary=j.sal||0; CP.pendingJob=null;
     CP.jobPerms=j.perms||[];
     if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest){
-      sbSave(SB.from('profiles').update({job:j.nm,job_salary:j.sal||0,pending_job:null}).eq('id',CU.id),'직업 저장');
+      sbSave(SB.from('profiles').update({job:j.nm,job_salary:j.sal||0,pending_job:null,job_perms:j.perms||[]}).eq('id',CU.id),'직업 저장');
       // 즉시 승인도 job_applications에 approved 기록
       if(CP.class_id){
         SB.from('job_applications').upsert({
@@ -4257,7 +4267,8 @@ async function approveJobApp(stuId){
     await sbSave(SB.from('profiles').update({
       job:jobNm,
       job_salary:jobSal,
-      pending_job:null
+      pending_job:null,
+      job_perms:jobPerms
     }).eq('id',stuId),'직업 승인 저장');
     // job_applications 승인 처리
     try{
@@ -6888,7 +6899,17 @@ function fmtTime(){
   const h=n.getHours(),m=String(n.getMinutes()).padStart(2,'0');
   return `${h>=12?'오후':'오전'} ${h>12?h-12:h||12}:${m}`;
 }
-function escHtml(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML;}
+function escHtml(s){
+  if(s==null)return '';
+  return String(s)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;')
+    .replace(/'/g,'&#39;')
+    .replace(/\n/g,'&#10;')
+    .replace(/\r/g,'&#13;');
+}
 
 function loadBoard(){
   if(SB&&CU&&CP?.class_id&&CP?.id!=='demo'&&!CP?._isGuest){
@@ -7730,48 +7751,39 @@ try{
 async function loadPluginsFromSB(){
   if(!SB||!CU||CP?.id==='demo'||CP?._isGuest)return;
   try{
-    // classes.settings에서 플러그인 로드 (teacher) 또는 개인 localStorage 사용
+    const validPlugin=(p)=>{
+      if(!p||typeof p!=='object')return false;
+      if(!p.code||typeof p.code!=='string'||!p.code.trim())return false;
+      try{new Function(p.code);return true;}catch(_){return false;}
+    };
+    let pool=[]; // 학급 공유 플러그인 풀
     if(CP?.class_id){
       const{data}=await SB.from('classes').select('settings').eq('id',CP.class_id).maybeSingle();
-      if(data?.settings?.userPlugins&&Array.isArray(data.settings.userPlugins)&&data.settings.userPlugins.length){
-        const validPlugin=(p)=>{
-          if(!p||typeof p!=='object')return false;
-          if(!p.code||typeof p.code!=='string'||!p.code.trim())return false;
-          try{new Function(p.code);return true;}catch(_){return false;}
-        };
-        const loaded=data.settings.userPlugins.filter(validPlugin);
-        if(loaded.length){
-          userPlugins=loaded;
-          try{localStorage.setItem('cw_user_plugins',JSON.stringify(userPlugins));}catch(_){}
-        }
+      if(data?.settings?.userPlugins&&Array.isArray(data.settings.userPlugins)){
+        pool=data.settings.userPlugins.filter(validPlugin);
       }
-      if(data?.settings?.installedPlugins&&Array.isArray(data.settings.installedPlugins)){
-        installedSet=new Set(data.settings.installedPlugins.map(String));
-        try{localStorage.setItem('cw_installed',JSON.stringify([...installedSet]));}catch(_){}
-      }
+      // installedPlugins(학급 공유)는 의미 없으니 개인 데이터로만 사용
     }
-    // profiles.user_plugins / installed_plugins (개인 동기화 우선)
+    // profiles에서 본인 user_plugins / installed_plugins 가져오기
+    let myPlugins=[];
     try{
       const{data:pf}=await SB.from('profiles').select('user_plugins,installed_plugins').eq('id',CU.id).maybeSingle();
       if(pf){
-        const validPlugin=(p)=>{
-          if(!p||typeof p!=='object')return false;
-          if(!p.code||typeof p.code!=='string'||!p.code.trim())return false;
-          try{new Function(p.code);return true;}catch(_){return false;}
-        };
-        if(Array.isArray(pf.user_plugins)&&pf.user_plugins.length){
-          const loaded=pf.user_plugins.filter(validPlugin);
-          if(loaded.length){
-            userPlugins=loaded;
-            try{localStorage.setItem('cw_user_plugins',JSON.stringify(userPlugins));}catch(_){}
-          }
-        }
+        if(Array.isArray(pf.user_plugins))myPlugins=pf.user_plugins.filter(validPlugin);
         if(Array.isArray(pf.installed_plugins)){
           installedSet=new Set(pf.installed_plugins.map(String));
           try{localStorage.setItem('cw_installed',JSON.stringify([...installedSet]));}catch(_){}
         }
       }
     }catch(_){}
+    // 학급 풀 + 본인 플러그인 merge (id 중복 시 본인 것 우선 — 본인 최신 편집본 반영)
+    const mineIds=new Set(myPlugins.map(p=>String(p.id)));
+    const others=pool.filter(p=>!mineIds.has(String(p.id)));
+    const merged=[...others,...myPlugins];
+    if(merged.length){
+      userPlugins=merged;
+      try{localStorage.setItem('cw_user_plugins',JSON.stringify(userPlugins));}catch(_){}
+    }
   }catch(e){console.error('[loadPluginsFromSB]',e);}
 }
 let pedEditId=null; // 편집 중인 플러그인 id
@@ -7783,14 +7795,28 @@ function savePluginStorage(){
   }catch(e){
     try{localStorage.removeItem('cw_user_plugins');localStorage.removeItem('cw_installed');}catch(_){}
   }
-  // Supabase classes.settings 저장 (선생님)
+  // 학급 공유 풀에 merge 저장 — 다른 사람이 만든 플러그인을 덮어쓰지 않음
   if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest&&CP?.class_id){
-    mergeClassSettings({userPlugins:userPlugins,installedPlugins:[...installedSet]});
+    SB.from('classes').select('settings').eq('id',CP.class_id).maybeSingle().then(function(res){
+      const cur=(res&&res.data&&res.data.settings)||{};
+      const pool=Array.isArray(cur.userPlugins)?cur.userPlugins.slice():[];
+      // 본인이 만든 (id가 u_로 시작) 플러그인만 추출
+      const mine=userPlugins.filter(function(p){return String(p.id||'').startsWith('u_');});
+      // pool에서 본인 것 제거 후 본인 최신 버전 다시 추가 (다른 사람 거 보존)
+      const others=pool.filter(function(p){
+        // 본인 id가 아닌 모든 것 유지
+        return !mine.some(function(m){return String(m.id)===String(p.id);});
+      });
+      const merged={...cur,userPlugins:[...others,...mine]};
+      // installedPlugins는 본인 것이라 그대로 덮어써도 OK (사용자별 분리는 profiles에)
+      SB.from('classes').update({settings:merged}).eq('id',CP.class_id).then(function(){},function(){});
+      window._classSettings=Object.assign(window._classSettings||{},{userPlugins:merged.userPlugins});
+    },function(){});
   }
-  // profiles에도 항상 저장 (학생 포함, 기기 동기화)
+  // profiles에도 항상 저장 (개인 동기화)
   if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest){
     SB.from('profiles').update({
-      user_plugins:userPlugins,
+      user_plugins:userPlugins.filter(p=>String(p.id||'').startsWith('u_')),
       installed_plugins:[...installedSet]
     }).eq('id',CU.id).then(()=>{},()=>{});
   }

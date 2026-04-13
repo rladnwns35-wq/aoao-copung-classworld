@@ -8155,30 +8155,33 @@ async function loadPluginsFromSB(){
 }
 let pedEditId=null; // 편집 중인 플러그인 id
 
-function savePluginStorage(){
+async function savePluginStorage(){
   // localStorage 저장 안 함 — 모든 데이터는 Supabase에서만 관리
-  // 본인 프로필에 저장 (내 플러그인 + 설치 목록)
-  if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest){
-    SB.from('profiles').update({
+  if(!SB||!CU||CP?.id==='demo'||CP?._isGuest)return;
+  // 1) 본인 프로필에 저장 (내 플러그인 + 설치 목록)
+  try{
+    await SB.from('profiles').update({
       user_plugins:userPlugins,
       installed_plugins:[...installedSet]
-    }).eq('id',CU.id).then(()=>{},()=>{});
-  }
-  // 학급 공유 스토어에 merge — 본인 플러그인을 author_uid로 식별
-  if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest&&CP?.class_id){
-    SB.from('classes').select('settings').eq('id',CP.class_id).maybeSingle().then(function(res){
-      const cur=(res&&res.data&&res.data.settings)||{};
+    }).eq('id',CU.id);
+  }catch(e){console.error('[savePluginStorage profiles]',e);}
+  // 2) 학급 공유 스토어에 merge — 본인 플러그인을 author_uid로 식별
+  if(CP?.class_id){
+    try{
+      const{data:res}=await SB.from('classes').select('settings').eq('id',CP.class_id).maybeSingle();
+      const cur=res?.settings||{};
       const pool=Array.isArray(cur.userPlugins)?cur.userPlugins.slice():[];
-      // 본인 플러그인 (author_uid 자동 부여)
+      // 본인 플러그인에 author_uid 부여
       const mine=userPlugins.map(p=>({...p,author_uid:CU.id,by:p.by||CP.name||'사용자'}));
-      // pool에서 본인 것 제거 (author_uid로 식별)
+      // pool에서 본인 것 제거 (author_uid로 식별) 후 최신 본인 것 추가
       const others=pool.filter(p=>p.author_uid!==CU.id);
-      const merged={...cur,userPlugins:[...others,...mine]};
-      SB.from('classes').update({settings:merged}).eq('id',CP.class_id).then(function(){},function(){});
-      // 로컬 캐시도 갱신
-      classStorePlugins=merged.userPlugins;
-      window._classSettings=Object.assign(window._classSettings||{},{userPlugins:merged.userPlugins});
-    },function(){});
+      const mergedPool=[...others,...mine];
+      const merged={...cur,userPlugins:mergedPool};
+      await SB.from('classes').update({settings:merged}).eq('id',CP.class_id);
+      // 로컬 캐시 즉시 동기화 (비동기 .then() 안이 아니라 여기서)
+      classStorePlugins=mergedPool;
+      window._classSettings=Object.assign(window._classSettings||{},{userPlugins:mergedPool});
+    }catch(e){console.error('[savePluginStorage classes]',e);}
   }
 }
 
@@ -8593,7 +8596,7 @@ function pedInsertSnippet(key){
 
 
 
-function pedSave(){
+async function pedSave(){
   const nm=document.getElementById('ped-nm').value.trim();
   const desc=document.getElementById('ped-desc').value.trim();
   const tag=document.getElementById('cs-ped-tag')?.querySelector('.cs-btn')?.dataset.val||'게임';
@@ -8616,9 +8619,9 @@ function pedSave(){
     userPlugins.push(newP);
     toast(`${nm} 스토어 등록 완료!`,'s');
   }
-  savePluginStorage();
+  await savePluginStorage();
   closeMod('md-plugin-edit');
-  // 내 플러그인 탭으로 이동
+  // 내 플러그인 탭으로 이동 (savePluginStorage 완료 후라 classStorePlugins도 최신)
   const mineBtn=document.querySelector('#comm-tabs .admtab[onclick*="mine"]');
   commTab('mine', mineBtn||null);
 }

@@ -2806,87 +2806,147 @@ function loadStaff(){
     </div>`}`;
 }
 
-/* 직원 권한 액션 헬퍼 — 학생용 간이 모달들 */
+/* === 직원 권한 공통 헬퍼 === */
+// 학급 전체 학생을 DB에서 직접 fetch (본인 포함, 항상 최신)
+async function _staffFetchClassStudents(){
+  if(!SB||!CP?.class_id||CP?.id==='demo'||CP?._isGuest)return [];
+  try{
+    const{data}=await SB.from('profiles')
+      .select('id,name,balance,credit_grade,job,job_salary,is_suspended,role')
+      .eq('class_id',CP.class_id)
+      .eq('role','student')
+      .order('name');
+    return Array.isArray(data)?data:[];
+  }catch(e){console.error('[_staffFetchClassStudents]',e);return[];}
+}
+// 학생 카드 그리드 HTML 생성 (선택 가능)
+function _staffStudentGrid(students,onClickFn){
+  if(!students.length)return '<div class="empty" style="padding:40px"><div class="empty-t">학생이 없어요</div></div>';
+  return `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;max-height:60vh;overflow-y:auto;padding:4px">
+    ${students.map(s=>`
+      <div onclick="${onClickFn}('${escHtml(s.id)}','${escHtml(s.name||'')}')" style="background:#fff;border:1.5px solid #e2e8f0;border-radius:12px;padding:12px;cursor:pointer;transition:.15s;display:flex;align-items:center;gap:10px" onmouseover="this.style.borderColor='#3b82f6';this.style.background='#eff6ff'" onmouseout="this.style.borderColor='#e2e8f0';this.style.background='#fff'">
+        <div style="width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#1d4ed8,#3b82f6);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:900;color:#fff;flex-shrink:0">${escHtml((s.name||'?')[0])}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:800;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(s.name||'학생')}</div>
+          <div style="font-size:11px;color:#64748b;margin-top:1px">${(s.balance||0).toLocaleString()} CC · ${escHtml(s.credit_grade||'B')}등급${s.is_suspended?' · 🚫':''}</div>
+        </div>
+      </div>`).join('')}
+  </div>`;
+}
+
+/* === 공지 작성 === */
 async function openStaffNotice(){
   if(!hasJobPerm('announce')){toast('💼 "공지 작성" 권한이 없어요','e');return;}
-  const title=prompt('공지 제목:','');
-  if(!title)return;
-  const content=prompt('공지 내용:','');
-  if(content===null)return;
-  if(SB&&CU&&CP?.class_id){
-    const{error}=await SB.from('notices').insert({class_id:CP.class_id,created_by:CU.id,title:title.trim(),content:(content||'').trim(),is_global:false});
-    if(error){toast('공지 저장 실패: '+error.message,'e');return;}
-  }
-  toast('📢 공지 작성 완료!','s');
+  openStaffModal('📢 공지 작성',`
+    <div style="display:flex;flex-direction:column;gap:12px;padding:8px 4px">
+      <div class="fg"><label class="fl">제목</label><input class="fi" id="staff-notice-title" placeholder="공지 제목"></div>
+      <div class="fg"><label class="fl">내용</label><textarea class="fi" id="staff-notice-content" rows="5" placeholder="공지 내용을 입력하세요" style="resize:vertical;font-family:var(--font)"></textarea></div>
+      <button class="btn btn-p" onclick="staffSubmitNotice()" style="margin-top:4px">📢 공지 발행</button>
+    </div>`);
 }
+async function staffSubmitNotice(){
+  if(!hasJobPerm('announce'))return;
+  const title=document.getElementById('staff-notice-title')?.value?.trim();
+  const content=document.getElementById('staff-notice-content')?.value?.trim();
+  if(!title){toast('제목을 입력하세요','e');return;}
+  if(!SB||!CP?.class_id||!CU){toast('학급 정보가 없어요','e');return;}
+  const{error}=await SB.from('notices').insert({class_id:CP.class_id,created_by:CU.id,title,content:content||'',is_global:false});
+  if(error){toast('저장 실패: '+error.message,'e');return;}
+  toast('📢 공지 발행 완료!','s');
+  closeMod('md-staff-action');
+}
+
+/* === 코인 지급/차감 === */
 async function openStaffGive(mode){
   const isReward=mode==='reward';
   if(!hasJobPerm(isReward?'reward':'deduct')){toast('💼 권한이 없어요','e');return;}
-  if(!_dstuLoaded&&typeof loadDSTU==='function')await loadDSTU();
-  const stus=DSTU.filter(s=>s.role==='student'||!s.role);
-  const list=stus.map((s,i)=>`${i+1}. ${s.nm} (${s.bal||0} CC)`).join('\n');
-  const pick=prompt(`${isReward?'지급':'차감'}할 학생 번호:\n\n${list}`,'1');
-  if(!pick)return;
-  const idx=parseInt(pick)-1;
-  const s=stus[idx];
-  if(!s){toast('잘못된 번호','e');return;}
-  const amt=parseInt(prompt(`${s.nm}에게 ${isReward?'지급':'차감'}할 코인 (양수):`,'10')||0);
+  const stus=await _staffFetchClassStudents();
+  window._staffGiveMode=mode;
+  openStaffModal(isReward?'💰 코인 지급':'💸 코인 차감',
+    `<div style="font-size:12px;color:#64748b;margin-bottom:10px;padding:0 4px">학생을 선택하세요</div>${_staffStudentGrid(stus,'staffPickGiveTarget')}`);
+}
+async function staffPickGiveTarget(stuId,stuName){
+  const isReward=window._staffGiveMode==='reward';
+  if(!hasJobPerm(isReward?'reward':'deduct'))return;
+  const amt=parseInt(prompt(`${stuName}에게 ${isReward?'지급':'차감'}할 금액 (CC):`,'10')||0);
   if(!amt||amt<=0)return;
   const delta=isReward?amt:-amt;
-  const newBal=Math.max(0,(s.bal||0)+delta);
-  s.bal=newBal;
-  if(SB&&s.id&&!String(s.id).startsWith('s')&&CP?.id!=='demo'){
-    await SB.from('profiles').update({balance:newBal}).eq('id',s.id);
-    SB.from('transactions').insert({from_id:CU?.id,to_id:s.id,amount:delta,type:isReward?'reward':'deduct',description:`직원 ${isReward?'지급':'차감'} (${CP?.name||''})`,class_id:CP?.class_id}).then(()=>{},()=>{});
+  if(SB){
+    // 현재 잔액 조회 → 업데이트 (트랜잭션 필요하지만 간단히)
+    const{data:cur}=await SB.from('profiles').select('balance').eq('id',stuId).single();
+    const newBal=Math.max(0,(cur?.balance||0)+delta);
+    const{error}=await SB.from('profiles').update({balance:newBal}).eq('id',stuId);
+    if(error){toast('실패: '+error.message,'e');return;}
+    SB.from('transactions').insert({from_id:CU?.id,to_id:stuId,amount:delta,type:isReward?'reward':'deduct',description:`직원 ${isReward?'지급':'차감'} (${CP?.name||''})`,class_id:CP?.class_id}).then(()=>{},()=>{});
   }
-  toast(`${s.nm}에게 ${isReward?'+':'-'}${amt} CC ${isReward?'지급':'차감'}!`,'s');
+  toast(`${stuName}에게 ${isReward?'+':''}${delta} CC ${isReward?'지급':'차감'}!`,'s');
+  closeMod('md-staff-action');
+  setTimeout(()=>openStaffGive(window._staffGiveMode),200);
 }
+
+/* === 학생 정지 === */
 async function openStaffBan(){
   if(!hasJobPerm('ban')){toast('💼 "정지 권한"이 없어요','e');return;}
-  if(!_dstuLoaded&&typeof loadDSTU==='function')await loadDSTU();
-  const stus=DSTU.filter(s=>s.role==='student'||!s.role);
-  const list=stus.map((s,i)=>`${i+1}. ${s.nm} ${s.sus?'(정지중)':''}`).join('\n');
-  const pick=prompt(`정지/해제할 학생 번호:\n\n${list}`,'1');
-  if(!pick)return;
-  const idx=parseInt(pick)-1;
-  const s=stus[idx];
-  if(!s){toast('잘못된 번호','e');return;}
-  s.sus=!s.sus;
-  if(SB&&s.id&&!String(s.id).startsWith('s')&&CP?.id!=='demo'){
-    await SB.from('profiles').update({is_suspended:s.sus}).eq('id',s.id);
-  }
-  toast(`${s.nm} ${s.sus?'정지됨':'정지 해제됨'}`,'i');
+  const stus=await _staffFetchClassStudents();
+  openStaffModal('🚫 학생 정지/해제',
+    `<div style="font-size:12px;color:#64748b;margin-bottom:10px;padding:0 4px">학생을 클릭해서 정지/해제 토글</div>${_staffStudentGrid(stus,'staffToggleBan')}`);
 }
+async function staffToggleBan(stuId,stuName){
+  if(!hasJobPerm('ban'))return;
+  if(SB){
+    const{data:cur}=await SB.from('profiles').select('is_suspended').eq('id',stuId).single();
+    const newSus=!cur?.is_suspended;
+    const{error}=await SB.from('profiles').update({is_suspended:newSus}).eq('id',stuId);
+    if(error){toast('실패: '+error.message,'e');return;}
+    toast(`${stuName} ${newSus?'정지됨':'정지 해제됨'}`,'i');
+  }
+  closeMod('md-staff-action');
+  setTimeout(openStaffBan,200);
+}
+
+/* === 학급 정보 조회 === */
 async function openStaffClassInfo(){
   if(!hasJobPerm('class_info')){toast('💼 권한이 없어요','e');return;}
-  if(!_dstuLoaded&&typeof loadDSTU==='function')await loadDSTU();
-  const stus=DSTU.filter(s=>s.role==='student'||!s.role);
-  const total=stus.reduce((a,b)=>a+(b.bal||0),0);
-  const txt=stus.map((s,i)=>`${i+1}. ${s.nm} — ${s.bal||0} CC (${s.job||'학생'})`).join('\n');
-  alert(`📋 학급 학생 ${stus.length}명 / 총자산 ${total.toLocaleString()} CC\n\n${txt}`);
+  const stus=await _staffFetchClassStudents();
+  const total=stus.reduce((a,b)=>a+(b.balance||0),0);
+  const head=`<div style="background:linear-gradient(135deg,#eff6ff,#dbeafe);border-radius:12px;padding:14px;margin-bottom:12px;display:flex;justify-content:space-around;text-align:center">
+    <div><div style="font-size:11px;color:#64748b">학생 수</div><div style="font-size:18px;font-weight:900;color:#1d4ed8">${stus.length}명</div></div>
+    <div><div style="font-size:11px;color:#64748b">총 자산</div><div style="font-size:18px;font-weight:900;color:#1d4ed8">${total.toLocaleString()} CC</div></div>
+    <div><div style="font-size:11px;color:#64748b">평균</div><div style="font-size:18px;font-weight:900;color:#1d4ed8">${stus.length?Math.round(total/stus.length).toLocaleString():0} CC</div></div>
+  </div>`;
+  openStaffModal('📋 학급 정보',head+_staffStudentGrid(stus,'staffNoop'));
 }
+function staffNoop(){}
 
-/* === 직원 권한 전용 모달 시스템 === */
-function openStaffModal(title,bodyHtml,onMount){
-  const id='md-staff-action';
-  let el=document.getElementById(id);
-  if(el)el.remove();
-  document.body.insertAdjacentHTML('beforeend',`
-  <div class="ov" id="${id}">
-    <div class="modal" style="width:min(720px,96vw);max-height:90vh;overflow-y:auto">
-      <div class="mhdr">
-        <div class="mtitle">${escHtml(title)}</div>
-        <button class="mclose" onclick="closeMod('${id}')"><svg viewBox="0 0 9 9" fill="none" width="9" height="9"><path d="M1 1l7 7M8 1L1 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
-      </div>
-      <div id="staff-modal-body" style="padding:4px 2px">${bodyHtml}</div>
-    </div>
-  </div>`);
-  openMod(id);
-  if(typeof onMount==='function')setTimeout(()=>onMount(document.getElementById('staff-modal-body')),30);
-}
-
+/* === 자리 배치 (이미 위에 정의됨) === */
 async function openStaffSeating(){
   if(!hasJobPerm('seat_manage')){toast('💼 "자리 배치" 권한이 없어요','e');return;}
+  // 학급 전체 학생을 DB에서 강제로 다시 로드 (본인 포함)
+  if(SB&&CP?.class_id&&CP?.id!=='demo'&&!CP?._isGuest){
+    try{
+      const{data}=await SB.from('profiles')
+        .select('id,name,role,is_suspended')
+        .eq('class_id',CP.class_id)
+        .eq('role','student');
+      if(Array.isArray(data)){
+        DSTU.length=0;
+        data.filter(s=>s.id!==CU?.id).forEach(s=>{
+          DSTU.push({id:s.id,nm:s.name||'학생',bal:0,gr:'B',job:'학생',sus:s.is_suspended||false,role:'student',inventory:[]});
+        });
+        _dstuLoaded=true;
+      }
+    }catch(e){console.error('[openStaffSeating loadStudents]',e);}
+  }
+  // 저장된 자리 데이터/그리드 크기를 학급 settings에서 불러오기
+  if(SB&&CP?.class_id){
+    try{
+      const{data:cd}=await SB.from('classes').select('settings').eq('id',CP.class_id).maybeSingle();
+      const s=cd?.settings||{};
+      if(s.seatData)window._seatCache=s.seatData;
+      if(s.seatRows)window._seatRows=s.seatRows;
+      if(s.seatCols)window._seatCols=s.seatCols;
+    }catch(_){}
+  }
   openStaffModal('💺 자리 배치','<div id="staff-seating-host"></div>',function(){
     const host=document.getElementById('staff-seating-host');
     if(host&&typeof renderSeatingTab==='function'){
@@ -2895,24 +2955,27 @@ async function openStaffSeating(){
   });
 }
 
+/* === 퀘스트 승인 === */
 async function openStaffQuestApproval(){
   if(!hasJobPerm('quest_approve')){toast('💼 "퀘스트 승인" 권한이 없어요','e');return;}
   if(!SB||!CP?.class_id){toast('학급 정보가 없어요','e');return;}
-  const{data}=await SB.from('quest_completions')
-    .select('id,quest_id,user_id,status,created_at')
-    .eq('status','pending').order('created_at',{ascending:false}).limit(50);
-  const pendings=data||[];
+  // 1) 우리 학급 학생 id 목록
+  const{data:stus}=await SB.from('profiles').select('id,name').eq('class_id',CP.class_id).eq('role','student');
+  const stuIds=(stus||[]).map(s=>s.id);
+  const nameMap={};(stus||[]).forEach(s=>{nameMap[s.id]=s.name;});
+  // 2) 우리 학급 학생들의 pending 퀘스트만 fetch
+  let pendings=[];
+  if(stuIds.length){
+    const{data}=await SB.from('quest_completions')
+      .select('id,quest_id,user_id,status,created_at')
+      .eq('status','pending').in('user_id',stuIds)
+      .order('created_at',{ascending:false}).limit(50);
+    pendings=data||[];
+  }
   if(!pendings.length){
     openStaffModal('✅ 퀘스트 승인','<div class="empty" style="padding:40px"><div class="empty-t">대기 중인 퀘스트가 없어요</div></div>');
     return;
   }
-  // 학생 이름 가져오기
-  const uids=[...new Set(pendings.map(p=>p.user_id))];
-  let nameMap={};
-  try{
-    const{data:pf}=await SB.from('profiles').select('id,name').in('id',uids);
-    if(pf)pf.forEach(p=>{nameMap[p.id]=p.name;});
-  }catch(_){}
   const html=pendings.map(p=>`
     <div style="display:flex;align-items:center;gap:10px;background:#fff;border:1.5px solid #e2e8f0;border-radius:12px;padding:12px;margin-bottom:8px">
       <div style="flex:1;min-width:0">
@@ -2926,6 +2989,11 @@ async function openStaffQuestApproval(){
 }
 async function staffApproveQuest(id,uid,qid){
   if(!hasJobPerm('quest_approve'))return;
+  // 학급 학생인지 권한 검증 (다른 학급 퀘스트 승인 차단)
+  if(SB&&CP?.class_id){
+    const{data:tgt}=await SB.from('profiles').select('class_id').eq('id',uid).maybeSingle();
+    if(!tgt||tgt.class_id!==CP.class_id){toast('우리 학급 학생이 아니에요','e');return;}
+  }
   await SB.from('quest_completions').update({status:'approved',approved_by:CU?.id}).eq('id',id);
   toast('✅ 승인 완료','s');
   closeMod('md-staff-action');setTimeout(openStaffQuestApproval,200);
@@ -2937,6 +3005,7 @@ async function staffRejectQuest(id){
   closeMod('md-staff-action');setTimeout(openStaffQuestApproval,200);
 }
 
+/* === 대출 승인 === */
 async function openStaffLoanApproval(){
   if(!hasJobPerm('loan_approve')){toast('💼 "대출 승인" 권한이 없어요','e');return;}
   if(!SB||!CP?.class_id)return;
@@ -2949,40 +3018,54 @@ async function openStaffLoanApproval(){
     try{const{data:pf}=await SB.from('profiles').select('id,name').in('id',uids);if(pf)pf.forEach(p=>{nameMap[p.id]=p.name;});}catch(_){}
   }
   const html=loans.length?loans.map(l=>`
-    <div style="background:#fff;border:1.5px solid #e2e8f0;border-radius:12px;padding:12px;margin-bottom:8px">
-      <div style="font-size:13px;font-weight:800">${escHtml(nameMap[l.borrower_id]||'학생')}</div>
-      <div style="font-size:12px;color:#64748b;margin-top:3px">대출액 ${(l.amount||0).toLocaleString()} CC · 이자 ${l.interest}% · 만기 ${l.due_date||'-'}</div>
+    <div style="background:#fff;border:1.5px solid #e2e8f0;border-radius:12px;padding:12px;margin-bottom:8px;display:flex;align-items:center;gap:10px">
+      <div style="flex:1">
+        <div style="font-size:13px;font-weight:800">${escHtml(nameMap[l.borrower_id]||'학생')}</div>
+        <div style="font-size:11px;color:#64748b;margin-top:3px">대출 ${(l.amount||0).toLocaleString()} CC · 이자 ${l.interest}%${l.due_date?` · 만기 ${l.due_date}`:''}</div>
+      </div>
+      <button class="btn btn-r btn-xs" onclick="staffCancelLoan('${escHtml(l.id)}')">취소</button>
     </div>`).join(''):'<div class="empty" style="padding:40px"><div class="empty-t">진행 중인 대출이 없어요</div></div>';
   openStaffModal('🏦 대출 현황',`<div style="max-height:60vh;overflow-y:auto">${html}</div>`);
 }
+async function staffCancelLoan(id){
+  if(!hasJobPerm('loan_approve'))return;
+  if(!confirm('이 대출을 취소(상환 처리)할까요?'))return;
+  await SB.from('loans').update({is_repaid:true}).eq('id',id);
+  toast('대출 취소됨','i');
+  closeMod('md-staff-action');setTimeout(openStaffLoanApproval,200);
+}
 
+/* === 신용 조회 === */
 async function openStaffCreditView(){
   if(!hasJobPerm('credit_view')){toast('💼 "신용 조회" 권한이 없어요','e');return;}
-  if(!_dstuLoaded&&typeof loadDSTU==='function')await loadDSTU();
-  const stus=DSTU.filter(s=>s.role==='student'||!s.role);
+  if(!SB||!CP?.class_id)return;
+  const{data}=await SB.from('profiles').select('id,name,balance,credit_score,credit_grade')
+    .eq('class_id',CP.class_id).eq('role','student').order('credit_score',{ascending:false});
+  const stus=data||[];
   const html=stus.map(s=>`
     <div style="display:flex;align-items:center;gap:10px;background:#fff;border:1.5px solid #e2e8f0;border-radius:12px;padding:11px 14px;margin-bottom:6px">
-      <div style="flex:1"><div style="font-size:13px;font-weight:800">${escHtml(s.nm)}</div><div style="font-size:11px;color:#64748b">잔액 ${(s.bal||0).toLocaleString()} CC</div></div>
-      <span style="padding:4px 10px;background:#eff6ff;color:#1d4ed8;border-radius:99px;font-size:12px;font-weight:800">${escHtml(s.gr||'B')}등급</span>
+      <div style="flex:1"><div style="font-size:13px;font-weight:800">${escHtml(s.name||'')}</div><div style="font-size:11px;color:#64748b">잔액 ${(s.balance||0).toLocaleString()} CC · 점수 ${s.credit_score||0}</div></div>
+      <span style="padding:4px 10px;background:#eff6ff;color:#1d4ed8;border-radius:99px;font-size:12px;font-weight:800">${escHtml(s.credit_grade||'B')}등급</span>
     </div>`).join('');
   openStaffModal('📊 신용 조회',`<div style="max-height:60vh;overflow-y:auto">${html}</div>`);
 }
 
+/* === 경매 진행 === */
 async function openStaffAuction(){
   if(!hasJobPerm('auction')){toast('💼 "경매 진행" 권한이 없어요','e');return;}
   openStaffModal('🔨 경매 진행',`
-    <div style="padding:20px;text-align:center">
-      <div style="font-size:48px;margin-bottom:12px">🔨</div>
-      <div style="font-size:14px;font-weight:800;margin-bottom:8px">경매 시작하기</div>
-      <div style="font-size:12px;color:#64748b;margin-bottom:16px">학급 전체에 경매 알림이 전송됩니다</div>
-      <button class="btn btn-p btn-sm" onclick="staffStartAuction()">경매 시작</button>
+    <div style="display:flex;flex-direction:column;gap:12px;padding:8px 4px">
+      <div class="fg"><label class="fl">아이템 이름</label><input class="fi" id="staff-auc-item" placeholder="예: 자유 좌석권"></div>
+      <div class="fg"><label class="fl">시작가 (CC)</label><input class="fi" id="staff-auc-start" type="number" min="1" value="100"></div>
+      <button class="btn btn-p" onclick="staffStartAuction()">🔨 경매 시작</button>
     </div>`);
 }
 async function staffStartAuction(){
-  const item=prompt('경매 아이템 이름:','');
-  if(!item)return;
-  const start=parseInt(prompt('시작가 (CC):','100')||0);
-  if(!start||start<=0)return;
+  if(!hasJobPerm('auction'))return;
+  const item=document.getElementById('staff-auc-item')?.value?.trim();
+  const start=parseInt(document.getElementById('staff-auc-start')?.value)||0;
+  if(!item){toast('아이템 이름을 입력하세요','e');return;}
+  if(!start||start<=0){toast('시작가는 양수여야 해요','e');return;}
   if(SB&&CP?.class_id&&CU){
     await SB.from('notices').insert({class_id:CP.class_id,created_by:CU.id,title:'🔨 경매 시작!',content:`아이템: ${item} / 시작가: ${start} CC`,is_global:false});
   }
@@ -5020,6 +5103,7 @@ async function admTab(tab,btn){
     default:el.innerHTML='';
   }
 }
+function _seatHost(){return document.getElementById('staff-seating-host')||document.getElementById('adm-body');}
 function renderSeatingTab(el){
   const rows=parseInt(window._seatRows||5);
   const cols=parseInt(window._seatCols||6);
@@ -5084,7 +5168,7 @@ function seatClick(seatId){
   if(seats[seatId]){
     delete seats[seatId];
     if(SB&&CP?.class_id&&CP?.id!=='demo') mergeClassSettings({seatData:seats,seatRows:window._seatRows||5,seatCols:window._seatCols||6});
-    renderSeatingTab(document.getElementById('adm-body'));
+    renderSeatingTab(_seatHost());
   }
 }
 function seatAssignClick(stuId){
@@ -5099,13 +5183,13 @@ function seatDrop(e,seatId){
   Object.keys(seats).forEach(k=>{if(seats[k]===stuId)delete seats[k];});
   seats[seatId]=stuId;
   if(SB&&CP?.class_id&&CP?.id!=='demo') mergeClassSettings({seatData:seats,seatRows:window._seatRows||5,seatCols:window._seatCols||6});
-  renderSeatingTab(document.getElementById('adm-body'));
+  renderSeatingTab(_seatHost());
 }
 function updateSeatGrid(r,col){
   if(r)window._seatRows=parseInt(r)||5;
   if(col)window._seatCols=parseInt(col)||6;
   if(SB&&CP?.class_id&&CP?.id!=='demo') mergeClassSettings({seatData:window._seatCache||{},seatRows:window._seatRows||5,seatCols:window._seatCols||6});
-  renderSeatingTab(document.getElementById('adm-body'));
+  renderSeatingTab(_seatHost());
 }
 function autoAssignSeats(){
   const rows=parseInt(window._seatRows||5);
@@ -5119,7 +5203,7 @@ function autoAssignSeats(){
   });
   window._seatCache=seats;
   if(SB&&CP?.class_id&&CP?.id!=='demo') mergeClassSettings({seatData:seats,seatRows:rows,seatCols:cols});
-  renderSeatingTab(document.getElementById('adm-body'));
+  renderSeatingTab(_seatHost());
   toast('🎲 랜덤 배치 완료!','s');
 }
 async function saveSeatData(){
@@ -5129,7 +5213,7 @@ async function saveSeatData(){
     toast('자리 배치 저장됨! 💺','s');
   }catch(_){toast('자리 배치 저장됨! 💺','s');}
 }
-function clearSeats(){window._seatCache={};if(SB&&CP?.class_id&&CP?.id!=='demo')mergeClassSettings({seatData:{},seatRows:window._seatRows||5,seatCols:window._seatCols||6});renderSeatingTab(document.getElementById('adm-body'));toast('초기화','i');}
+function clearSeats(){window._seatCache={};if(SB&&CP?.class_id&&CP?.id!=='demo')mergeClassSettings({seatData:{},seatRows:window._seatRows||5,seatCols:window._seatCols||6});renderSeatingTab(_seatHost());toast('초기화','i');}
 function admGiveCC(idx){
   const s=DSTU[idx];if(!s)return;
   const amt=parseInt(prompt(`${s.nm}에게 줄 코인 (음수=회수):`)||0);

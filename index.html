@@ -8135,23 +8135,28 @@ async function loadPluginsFromSB(){
   userPlugins=[];
   classStorePlugins=[];
   installedSet=new Set();
-  if(!SB||!CU||CP?.id==='demo'||CP?._isGuest)return;
+  if(!SB||!CU||CP?.id==='demo'||CP?._isGuest){console.warn('[loadPluginsFromSB] skip');return;}
+  console.log('[loadPluginsFromSB] 시작. class_id =',CP?.class_id);
   try{
+    // 플러그인 유효성: 문법 오류도 그냥 로드만 해서 수정할 수 있게 (실행만 runPlugin에서 체크)
     const validPlugin=(p)=>{
       if(!p||typeof p!=='object')return false;
-      if(!p.code||typeof p.code!=='string'||!p.code.trim())return false;
-      try{new Function(p.code);return true;}catch(_){return false;}
+      if(!p.nm||typeof p.nm!=='string')return false;
+      return true;
     };
     // 1) 학급 스토어 (모든 사람의 플러그인)
     if(CP?.class_id){
       try{
-        const{data}=await SB.from('classes').select('settings').eq('id',CP.class_id).maybeSingle();
+        const{data,error}=await SB.from('classes').select('settings').eq('id',CP.class_id).maybeSingle();
+        if(error){console.error('[loadPluginsFromSB classes error]',error);}
+        console.log('[loadPluginsFromSB] classes.settings.userPlugins =',data?.settings?.userPlugins?.length||0,'개');
         if(data?.settings?.userPlugins&&Array.isArray(data.settings.userPlugins)){
           classStorePlugins=data.settings.userPlugins.filter(validPlugin);
+          console.log('[loadPluginsFromSB] 필터 후 classStorePlugins =',classStorePlugins.length,'개');
         } else {
           classStorePlugins=[];
         }
-      }catch(_){classStorePlugins=[];}
+      }catch(e){console.error('[loadPluginsFromSB classes catch]',e);classStorePlugins=[];}
     }
     // 2) 본인 profiles에서 내 것만
     try{
@@ -8178,33 +8183,49 @@ async function loadPluginsFromSB(){
 let pedEditId=null; // 편집 중인 플러그인 id
 
 async function savePluginStorage(){
-  if(!SB||!CU||CP?.id==='demo'||CP?._isGuest)return;
+  if(!SB||!CU||CP?.id==='demo'||CP?._isGuest){console.warn('[savePluginStorage] skip: SB/CU 없음');return;}
+  console.log('[savePluginStorage] 시작. userPlugins.length =',userPlugins.length,', class_id =',CP?.class_id);
   // 1) 본인 프로필에 저장
   try{
-    const{error:e1}=await SB.from('profiles').update({
+    const{data:pfData,error:e1}=await SB.from('profiles').update({
       user_plugins:userPlugins,
       installed_plugins:[...installedSet]
-    }).eq('id',CU.id);
+    }).eq('id',CU.id).select('user_plugins');
     if(e1){console.error('[savePluginStorage profiles error]',e1);toast('플러그인 저장 실패: '+e1.message,'e');}
-  }catch(e){console.error('[savePluginStorage profiles]',e);toast('플러그인 저장 실패','e');}
+    else console.log('[savePluginStorage] profiles OK. 저장된 개수 =',pfData?.[0]?.user_plugins?.length);
+  }catch(e){console.error('[savePluginStorage profiles catch]',e);toast('플러그인 저장 실패','e');}
   // 2) 학급 공유 스토어에 merge
   if(CP?.class_id){
     try{
+      // fetch
       const{data:res,error:eFetch}=await SB.from('classes').select('settings').eq('id',CP.class_id).maybeSingle();
       if(eFetch){console.error('[savePluginStorage fetch]',eFetch);toast('학급 설정 읽기 실패: '+eFetch.message,'e');return;}
       const cur=res?.settings||{};
       const pool=Array.isArray(cur.userPlugins)?cur.userPlugins.slice():[];
+      console.log('[savePluginStorage] 현재 pool.length =',pool.length);
+      // merge
       const mine=userPlugins.map(p=>({...p,author_uid:CU.id,by:p.by||CP.name||'사용자'}));
       const others=pool.filter(p=>p.author_uid!==CU.id);
       const mergedPool=[...others,...mine];
       const merged={...cur,userPlugins:mergedPool};
-      const{error:eUpd}=await SB.from('classes').update({settings:merged}).eq('id',CP.class_id);
+      console.log('[savePluginStorage] merge 완료. mergedPool.length =',mergedPool.length,'(내 것:',mine.length,'/ 남의 것:',others.length,')');
+      // update + select로 실제 반영 검증
+      const{data:updData,error:eUpd}=await SB.from('classes').update({settings:merged}).eq('id',CP.class_id).select('settings');
       if(eUpd){console.error('[savePluginStorage update]',eUpd);toast('학급 스토어 공유 실패: '+eUpd.message,'e');return;}
+      if(!updData||!updData.length){
+        console.error('[savePluginStorage] UPDATE 성공했지만 반환된 row 없음 — RLS 문제 가능성');
+        toast('학급 스토어 업데이트 권한 없음 (RLS)','e');
+        return;
+      }
+      const savedPool=updData[0]?.settings?.userPlugins||[];
+      console.log('[savePluginStorage] DB 반영 확인. savedPool.length =',savedPool.length);
       // 로컬 캐시 즉시 동기화
-      classStorePlugins=mergedPool;
-      window._classSettings=Object.assign(window._classSettings||{},{userPlugins:mergedPool});
-      console.log('[savePluginStorage] 학급 스토어 공유 완료:',mergedPool.length,'개');
-    }catch(e){console.error('[savePluginStorage classes]',e);toast('학급 스토어 저장 실패','e');}
+      classStorePlugins=savedPool;
+      window._classSettings=Object.assign(window._classSettings||{},{userPlugins:savedPool});
+      toast('✅ 학급 스토어에 공유됨 ('+mergedPool.length+'개)','s');
+    }catch(e){console.error('[savePluginStorage classes catch]',e);toast('학급 스토어 저장 실패: '+(e.message||e),'e');}
+  } else {
+    console.warn('[savePluginStorage] class_id 없음 — 학급 공유 스킵');
   }
 }
 

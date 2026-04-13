@@ -2769,7 +2769,18 @@ function goPage(id){
   document.querySelectorAll('.si').forEach(s=>s.classList.toggle('on',s.dataset.pg===id));
   const loaders={
     'pg-econ':loadEcon,'pg-shop':loadShop,'pg-quests':loadQuests,
-    'pg-jobs':loadJobs,'pg-credit':loadCredit,'pg-admin':()=>admTab('students',null),
+    'pg-jobs':loadJobs,'pg-credit':loadCredit,
+    'pg-admin':()=>{
+      const isTch=CP?.role==='teacher'||CP?.role==='dev'||CP?.role==='superadmin';
+      if(isTch){admTab('students',null);return;}
+      // 학생: 권한에 따라 적절한 탭 자동 선택
+      const perms=CP?.jobPerms||[];
+      const has=(p,l)=>perms.some(x=>x===p||x===l);
+      if(has('announce','공지 작성'))admTab('notice',null);
+      else if(has('seat_manage','자리 배치'))admTab('seating',null);
+      else if(has('quest_approve','퀘스트 승인'))admTab('quests',null);
+      else admTab('notice',null);
+    },
     'pg-dev':()=>devTab('users',null),'pg-comm':loadComm,'pg-board':loadBoard,
     'pg-rank':loadRanking,'pg-meal':loadMeal,'pg-schedule':loadSchedule,
   };
@@ -4862,6 +4873,11 @@ function admGiveCC(idx){
   const s=DSTU[idx];if(!s)return;
   const amt=parseInt(prompt(`${s.nm}에게 줄 코인 (음수=회수):`)||0);
   if(!amt)return;
+  // 학생: 권한 체크 (양수=reward, 음수=deduct)
+  if(CP?.role==='student'){
+    if(amt>0&&!hasJobPerm('reward')){toast('💼 "코인 지급" 권한이 없어요','e');return;}
+    if(amt<0&&!hasJobPerm('deduct')){toast('💼 "코인 차감" 권한이 없어요','e');return;}
+  }
   s.bal=Math.max(0,s.bal+amt);
   toast(`${s.nm}에게 ${amt>0?'+':''}${amt} CC 지급!`,'s');
   if(SB&&s.id&&!s.id.startsWith('s')&&CP?.id!=='demo'){
@@ -4883,6 +4899,7 @@ function admEditStu(idx){
 }
 function admSuspend(idx){
   const s=DSTU[idx];if(!s)return;
+  if(CP?.role==='student'&&!hasJobPerm('ban')){toast('💼 "정지 권한"이 없어요','e');return;}
   s.sus=!s.sus;
   toast(`${s.nm} ${s.sus?'정지됨':'정지 해제됨'}`,'i');
   if(SB&&s.id&&!s.id.startsWith('s')&&CP?.id!=='demo'){
@@ -9810,9 +9827,19 @@ function jobsTab(tab,btn){
     const myPerms=CP.jobPerms?.length?CP.jobPerms:(curJob?.perms||[]);
     // 권한별 바로가기 버튼 생성
     const permActions=[];
-    if(myPerms.some(p=>p==='shop_manage'||p==='상점 관리')) permActions.push(`<button class="btn btn-p btn-sm" onclick="goPage('pg-shop');shopTab('items',null)">🏪 상점 관리</button>`);
-    if(myPerms.some(p=>p==='announce'||p==='공지 작성')) permActions.push(`<button class="btn btn-p btn-sm" onclick="goPage('pg-admin');admTab('notice',null)">📢 공지 작성</button>`);
-    if(myPerms.some(p=>p==='seat_manage'||p==='자리 배치'||p==='좌석 배치')) permActions.push(`<button class="btn btn-p btn-sm" onclick="goPage('pg-admin');admTab('seating',null)">💺 자리 배치</button>`);
+    const _has=(p,l)=>myPerms.some(x=>x===p||x===l);
+    if(_has('shop_manage','상점 관리')) permActions.push(`<button class="btn btn-p btn-sm" onclick="goPage('pg-shop');shopTab('items',null)">🏪 상점 관리</button>`);
+    if(_has('announce','공지 작성')) permActions.push(`<button class="btn btn-p btn-sm" onclick="goPage('pg-admin');admTab('notice',null)">📢 공지 작성</button>`);
+    if(_has('seat_manage','자리 배치')) permActions.push(`<button class="btn btn-p btn-sm" onclick="goPage('pg-admin');admTab('seating',null)">💺 자리 배치</button>`);
+    if(_has('quest_approve','퀘스트 승인')) permActions.push(`<button class="btn btn-p btn-sm" onclick="goPage('pg-quests')">✅ 퀘스트 승인</button>`);
+    if(_has('reward','코인 지급')) permActions.push(`<button class="btn btn-p btn-sm" onclick="goPage('pg-admin');admTab('students',null)">💰 코인 지급</button>`);
+    if(_has('deduct','코인 차감')) permActions.push(`<button class="btn btn-p btn-sm" onclick="goPage('pg-admin');admTab('students',null)">💸 코인 차감</button>`);
+    if(_has('ban','정지 권한')) permActions.push(`<button class="btn btn-p btn-sm" onclick="goPage('pg-admin');admTab('students',null)">🚫 학생 정지</button>`);
+    if(_has('loan_approve','대출 승인')) permActions.push(`<button class="btn btn-p btn-sm" onclick="goPage('pg-econ')">🏦 대출 승인</button>`);
+    if(_has('credit_view','신용 조회')) permActions.push(`<button class="btn btn-p btn-sm" onclick="goPage('pg-credit')">📊 신용 조회</button>`);
+    if(_has('class_info','학급 정보 조회')) permActions.push(`<button class="btn btn-p btn-sm" onclick="goPage('pg-admin');admTab('students',null)">📋 학급 정보</button>`);
+    if(_has('auction','경매 진행')) permActions.push(`<button class="btn btn-p btn-sm" onclick="goPage('pg-shop');shopTab('market',null)">🔨 경매</button>`);
+    if(_has('market','중고거래 중재')) permActions.push(`<button class="btn btn-p btn-sm" onclick="goPage('pg-shop');shopTab('market',null)">🤝 중고 중재</button>`);
     el.innerHTML=`<div style="max-width:100%">${curJob?`
       <div style="background:linear-gradient(135deg,#eff6ff,#dbeafe);border:1.5px solid #bfdbfe;border-radius:18px;padding:20px;margin-bottom:20px;display:flex;align-items:center;gap:16px">
         <div style="width:56px;height:56px;border-radius:16px;background:linear-gradient(135deg,#1d4ed8,#3b82f6);display:flex;align-items:center;justify-content:center;font-size:26px;flex-shrink:0">${curJob.ico&&curJob.ico.startsWith('<')?curJob.ico:curJob.ico||'💼'}</div>

@@ -1018,6 +1018,14 @@ hr.div{border:none;border-top:1px solid #f1f5f9;margin:16px 0;}
         <div id="grade-bens"></div>
       </div>
 
+      <!-- ══ STAFF (직원 권한) ════════════════════ -->
+      <div class="page" id="pg-staff">
+        <div class="ph">
+          <div><div class="ph-t"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M9 1.5l2 4 4.5.6-3.2 3.1.8 4.4L9 11.5l-4.1 2.1.8-4.4L2.5 6.1 7 5.5z" stroke="#1d4ed8" stroke-width="1.4" stroke-linejoin="round"/></svg>직원 권한</div><div class="ph-s">내 직업 권한으로 할 수 있는 일들</div></div>
+        </div>
+        <div id="staff-body"></div>
+      </div>
+
       <!-- ══ RANKING ══════════════════════════════ -->
       <div class="page" id="pg-rank">
         <div class="ph">
@@ -2241,10 +2249,15 @@ function initRealtimeSubscriptions(){
           }
         }
       }
-      // 직업 승인됨 알림
+      // 직업 승인됨 알림 + 사이드바 재생성 (직원 권한 메뉴 노출)
       if(d.job&&d.job!==prevJob&&d.job!=='학생'){
         toast(`🎉 직업 승인됨: ${d.job}! 권한이 적용됐어요`,'s');
+        if(typeof buildSidebar==='function')buildSidebar();
         if(document.getElementById('pg-jobs')?.classList.contains('on'))loadJobs();
+      }
+      // 권한 변경 시에도 사이드바 갱신
+      if(Array.isArray(d.job_perms)){
+        if(typeof buildSidebar==='function')buildSidebar();
       }
     }).subscribe();
   _realtimeChannels.push(profileCh);
@@ -2714,6 +2727,10 @@ function buildSidebar(){
     h+=sgrp('메인',[{pg:'pg-dash',l:'대시보드',ic:'dash'},{pg:'pg-board',l:'학교판',ic:'board'}]);
     h+=sgrp('경제',[{pg:'pg-econ',l:'경제 센터',ic:'econ'},{pg:'pg-shop',l:'상점',ic:'shop'},{pg:'pg-quests',l:'퀘스트',ic:'quests'},{pg:'pg-jobs',l:'직업',ic:'jobs'},{pg:'pg-credit',l:'신용등급',ic:'credit'}]);
     h+=sgrp('커뮤니티',[{pg:'pg-comm',l:'커뮤니티',ic:'comm'},{pg:'pg-rank',l:'자산 순위',ic:'rank'},{pg:'pg-meal',l:'급식 메뉴',ic:'meal'},{pg:'pg-schedule',l:'일정',ic:'sched'}]);
+    // 학생: 직업 권한이 있으면 "직원 권한" 메뉴 노출
+    if(r==='student'&&Array.isArray(CP.jobPerms)&&CP.jobPerms.length>0){
+      h+=sgrp('직원',[{pg:'pg-staff',l:'직원 권한',ic:'jobs'}]);
+    }
   }
   if(r==='dev'){
     h+=sgrp('메인',[{pg:'pg-dash',l:'대시보드',ic:'dash'},{pg:'pg-board',l:'학교판',ic:'board'}]);
@@ -2733,6 +2750,121 @@ function toggleSidebar(){
   document.getElementById('sb-toggle').title=sbCollapsed?'사이드바 열기':'사이드바 닫기';
 }
 function sgrp(lbl,items){return`<div class="sb-grp"><div class="sb-lbl">${lbl}</div>${items.map(i=>`<div class="si" data-pg="${i.pg}" onclick="goPage('${i.pg}')">${SB_ICONS[i.ic]||''}<span>${i.l}</span></div>`).join('')}</div>`;}
+
+/* ===========================================
+   STAFF — 학생 직원 권한 페이지
+=========================================== */
+function loadStaff(){
+  const el=document.getElementById('staff-body');
+  if(!el)return;
+  const perms=Array.isArray(CP?.jobPerms)?CP.jobPerms:[];
+  const has=(p,l)=>perms.some(x=>x===p||x===l);
+  const curJob=(typeof getAllJobs==='function'?getAllJobs():[...DJOBS,...(customJobs||[])]).find(j=>j.nm===CP?.job);
+  // 권한 → 카드 정의 (id, label, icon, color, action 함수 호출 코드)
+  const STAFF_ACTIONS=[
+    {id:'shop_manage',  l:'상점 관리',     ic:'🏪', c:'#1d4ed8', d:'아이템 추가·수정·삭제',          go:"goPage('pg-shop');setTimeout(()=>shopTab('items',null),50)"},
+    {id:'announce',     l:'공지 작성',     ic:'📢', c:'#9333ea', d:'학급 전체에 공지를 보내요',       go:"openStaffNotice()"},
+    {id:'reward',       l:'코인 지급',     ic:'💰', c:'#16a34a', d:'학생에게 코인을 지급해요',         go:"openStaffGive('reward')"},
+    {id:'deduct',       l:'코인 차감',     ic:'💸', c:'#dc2626', d:'학생에게서 코인을 회수해요',       go:"openStaffGive('deduct')"},
+    {id:'quest_approve',l:'퀘스트 승인',   ic:'✅', c:'#0891b2', d:'학생 퀘스트 완료를 승인해요',     go:"goPage('pg-quests')"},
+    {id:'ban',          l:'학생 정지',     ic:'🚫', c:'#ea580c', d:'규칙 위반 학생을 정지해요',       go:"openStaffBan()"},
+    {id:'loan_approve', l:'대출 승인',     ic:'🏦', c:'#0d9488', d:'학생 대출 신청을 검토해요',       go:"goPage('pg-econ')"},
+    {id:'credit_view',  l:'신용 조회',     ic:'📊', c:'#7c3aed', d:'학생 신용 점수를 확인해요',       go:"goPage('pg-credit')"},
+    {id:'class_info',   l:'학급 정보',     ic:'📋', c:'#0369a1', d:'학급 학생 명단을 확인해요',       go:"openStaffClassInfo()"},
+    {id:'auction',      l:'경매 진행',     ic:'🔨', c:'#b45309', d:'학급 경매를 진행해요',           go:"goPage('pg-shop');setTimeout(()=>shopTab('market',null),50)"},
+    {id:'market',       l:'중고 중재',     ic:'🤝', c:'#059669', d:'중고 거래를 중재해요',           go:"goPage('pg-shop');setTimeout(()=>shopTab('market',null),50)"},
+    {id:'seat_manage',  l:'자리 배치',     ic:'💺', c:'#be185d', d:'학급 좌석을 배치해요',           go:"goPage('pg-admin');setTimeout(()=>admTab('seating',null),50)"},
+  ];
+  const myActions=STAFF_ACTIONS.filter(a=>has(a.id,a.l));
+  el.innerHTML=`
+  <div style="background:linear-gradient(135deg,#eff6ff,#dbeafe);border:1.5px solid #bfdbfe;border-radius:18px;padding:18px 20px;margin-bottom:18px;display:flex;align-items:center;gap:14px">
+    <div style="width:52px;height:52px;border-radius:14px;background:linear-gradient(135deg,#1d4ed8,#3b82f6);display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0">${(curJob?.ico&&!curJob.ico.startsWith('<'))?curJob.ico:'💼'}</div>
+    <div style="flex:1;min-width:0">
+      <div style="font-size:11px;font-weight:700;color:#1d4ed8;letter-spacing:.5px">현재 직업</div>
+      <div style="font-size:18px;font-weight:900;color:#0f172a;margin-top:2px">${escHtml(CP?.job||'학생')}</div>
+      <div style="font-size:12px;color:#64748b;margin-top:2px">권한 ${myActions.length}개 보유</div>
+    </div>
+  </div>
+  ${myActions.length===0?`
+    <div class="empty" style="padding:60px 20px">
+      <div style="font-size:38px;margin-bottom:12px">🔒</div>
+      <div class="empty-t">아직 권한이 없어요</div>
+      <div class="empty-s">선생님이 직업 권한을 부여하면 여기에 표시돼요</div>
+    </div>`:`
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px">
+    ${myActions.map(a=>`
+      <div onclick="${a.go}" style="background:#fff;border:1.5px solid #eef2f8;border-radius:16px;padding:18px 16px;cursor:pointer;transition:.15s;display:flex;flex-direction:column;gap:10px" onmouseover="this.style.borderColor='${a.c}';this.style.transform='translateY(-2px)';this.style.boxShadow='0 6px 18px rgba(0,0,0,.08)'" onmouseout="this.style.borderColor='#eef2f8';this.style.transform='';this.style.boxShadow=''">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:42px;height:42px;border-radius:12px;background:${a.c}15;display:flex;align-items:center;justify-content:center;font-size:22px">${a.ic}</div>
+          <div style="font-size:15px;font-weight:800;color:#0f172a">${a.l}</div>
+        </div>
+        <div style="font-size:12.5px;color:#64748b;line-height:1.5">${a.d}</div>
+        <div style="margin-top:auto;display:flex;align-items:center;justify-content:space-between;padding-top:6px">
+          <span style="font-size:11px;font-weight:700;color:${a.c}">실행하기 →</span>
+        </div>
+      </div>`).join('')}
+    </div>`}`;
+}
+
+/* 직원 권한 액션 헬퍼 — 학생용 간이 모달들 */
+async function openStaffNotice(){
+  if(!hasJobPerm('announce')){toast('💼 "공지 작성" 권한이 없어요','e');return;}
+  const title=prompt('공지 제목:','');
+  if(!title)return;
+  const content=prompt('공지 내용:','');
+  if(content===null)return;
+  if(SB&&CU&&CP?.class_id){
+    const{error}=await SB.from('notices').insert({class_id:CP.class_id,created_by:CU.id,title:title.trim(),content:(content||'').trim(),is_global:false});
+    if(error){toast('공지 저장 실패: '+error.message,'e');return;}
+  }
+  toast('📢 공지 작성 완료!','s');
+}
+async function openStaffGive(mode){
+  const isReward=mode==='reward';
+  if(!hasJobPerm(isReward?'reward':'deduct')){toast('💼 권한이 없어요','e');return;}
+  if(!_dstuLoaded&&typeof loadDSTU==='function')await loadDSTU();
+  const stus=DSTU.filter(s=>s.role==='student'||!s.role);
+  const list=stus.map((s,i)=>`${i+1}. ${s.nm} (${s.bal||0} CC)`).join('\n');
+  const pick=prompt(`${isReward?'지급':'차감'}할 학생 번호:\n\n${list}`,'1');
+  if(!pick)return;
+  const idx=parseInt(pick)-1;
+  const s=stus[idx];
+  if(!s){toast('잘못된 번호','e');return;}
+  const amt=parseInt(prompt(`${s.nm}에게 ${isReward?'지급':'차감'}할 코인 (양수):`,'10')||0);
+  if(!amt||amt<=0)return;
+  const delta=isReward?amt:-amt;
+  const newBal=Math.max(0,(s.bal||0)+delta);
+  s.bal=newBal;
+  if(SB&&s.id&&!String(s.id).startsWith('s')&&CP?.id!=='demo'){
+    await SB.from('profiles').update({balance:newBal}).eq('id',s.id);
+    SB.from('transactions').insert({from_id:CU?.id,to_id:s.id,amount:delta,type:isReward?'reward':'deduct',description:`직원 ${isReward?'지급':'차감'} (${CP?.name||''})`,class_id:CP?.class_id}).then(()=>{},()=>{});
+  }
+  toast(`${s.nm}에게 ${isReward?'+':'-'}${amt} CC ${isReward?'지급':'차감'}!`,'s');
+}
+async function openStaffBan(){
+  if(!hasJobPerm('ban')){toast('💼 "정지 권한"이 없어요','e');return;}
+  if(!_dstuLoaded&&typeof loadDSTU==='function')await loadDSTU();
+  const stus=DSTU.filter(s=>s.role==='student'||!s.role);
+  const list=stus.map((s,i)=>`${i+1}. ${s.nm} ${s.sus?'(정지중)':''}`).join('\n');
+  const pick=prompt(`정지/해제할 학생 번호:\n\n${list}`,'1');
+  if(!pick)return;
+  const idx=parseInt(pick)-1;
+  const s=stus[idx];
+  if(!s){toast('잘못된 번호','e');return;}
+  s.sus=!s.sus;
+  if(SB&&s.id&&!String(s.id).startsWith('s')&&CP?.id!=='demo'){
+    await SB.from('profiles').update({is_suspended:s.sus}).eq('id',s.id);
+  }
+  toast(`${s.nm} ${s.sus?'정지됨':'정지 해제됨'}`,'i');
+}
+async function openStaffClassInfo(){
+  if(!hasJobPerm('class_info')){toast('💼 권한이 없어요','e');return;}
+  if(!_dstuLoaded&&typeof loadDSTU==='function')await loadDSTU();
+  const stus=DSTU.filter(s=>s.role==='student'||!s.role);
+  const total=stus.reduce((a,b)=>a+(b.bal||0),0);
+  const txt=stus.map((s,i)=>`${i+1}. ${s.nm} — ${s.bal||0} CC (${s.job||'학생'})`).join('\n');
+  alert(`📋 학급 학생 ${stus.length}명 / 총자산 ${total.toLocaleString()} CC\n\n${txt}`);
+}
 
 function updateCoin(){syncCoin();}
 
@@ -2769,7 +2901,7 @@ function goPage(id){
   document.querySelectorAll('.si').forEach(s=>s.classList.toggle('on',s.dataset.pg===id));
   const loaders={
     'pg-econ':loadEcon,'pg-shop':loadShop,'pg-quests':loadQuests,
-    'pg-jobs':loadJobs,'pg-credit':loadCredit,
+    'pg-jobs':loadJobs,'pg-credit':loadCredit,'pg-staff':loadStaff,
     'pg-admin':()=>{
       const isTch=CP?.role==='teacher'||CP?.role==='dev'||CP?.role==='superadmin';
       if(isTch){admTab('students',null);return;}

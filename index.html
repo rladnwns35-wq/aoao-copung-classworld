@@ -8129,6 +8129,9 @@ try{
   }
 }catch(_){installedSet=new Set();}
 // Supabase에서 플러그인 데이터 로드 (비동기, 앱 로드 후 호출됨)
+// 학급 공유 플러그인 스토어 (다른 사람 것 포함)
+let classStorePlugins=[];
+
 async function loadPluginsFromSB(){
   if(!SB||!CU||CP?.id==='demo'||CP?._isGuest)return;
   try{
@@ -8137,34 +8140,31 @@ async function loadPluginsFromSB(){
       if(!p.code||typeof p.code!=='string'||!p.code.trim())return false;
       try{new Function(p.code);return true;}catch(_){return false;}
     };
-    let pool=[]; // 학급 공유 플러그인 풀
+    // 1) 학급 스토어 (모든 사람의 플러그인)
     if(CP?.class_id){
-      const{data}=await SB.from('classes').select('settings').eq('id',CP.class_id).maybeSingle();
-      if(data?.settings?.userPlugins&&Array.isArray(data.settings.userPlugins)){
-        pool=data.settings.userPlugins.filter(validPlugin);
-      }
-      // installedPlugins(학급 공유)는 의미 없으니 개인 데이터로만 사용
+      try{
+        const{data}=await SB.from('classes').select('settings').eq('id',CP.class_id).maybeSingle();
+        if(data?.settings?.userPlugins&&Array.isArray(data.settings.userPlugins)){
+          classStorePlugins=data.settings.userPlugins.filter(validPlugin);
+        } else {
+          classStorePlugins=[];
+        }
+      }catch(_){classStorePlugins=[];}
     }
-    // profiles에서 본인 user_plugins / installed_plugins 가져오기
-    let myPlugins=[];
+    // 2) 본인 profiles에서 내 것만 (author_uid가 본인이거나 profiles에 저장된 것)
     try{
       const{data:pf}=await SB.from('profiles').select('user_plugins,installed_plugins').eq('id',CU.id).maybeSingle();
       if(pf){
-        if(Array.isArray(pf.user_plugins))myPlugins=pf.user_plugins.filter(validPlugin);
+        if(Array.isArray(pf.user_plugins)){
+          userPlugins=pf.user_plugins.filter(validPlugin);
+          try{localStorage.setItem('cw_user_plugins',JSON.stringify(userPlugins));}catch(_){}
+        }
         if(Array.isArray(pf.installed_plugins)){
           installedSet=new Set(pf.installed_plugins.map(String));
           try{localStorage.setItem('cw_installed',JSON.stringify([...installedSet]));}catch(_){}
         }
       }
     }catch(_){}
-    // 학급 풀 + 본인 플러그인 merge (id 중복 시 본인 것 우선 — 본인 최신 편집본 반영)
-    const mineIds=new Set(myPlugins.map(p=>String(p.id)));
-    const others=pool.filter(p=>!mineIds.has(String(p.id)));
-    const merged=[...others,...myPlugins];
-    if(merged.length){
-      userPlugins=merged;
-      try{localStorage.setItem('cw_user_plugins',JSON.stringify(userPlugins));}catch(_){}
-    }
   }catch(e){console.error('[loadPluginsFromSB]',e);}
 }
 let pedEditId=null; // 편집 중인 플러그인 id
@@ -8176,30 +8176,28 @@ function savePluginStorage(){
   }catch(e){
     try{localStorage.removeItem('cw_user_plugins');localStorage.removeItem('cw_installed');}catch(_){}
   }
-  // 학급 공유 풀에 merge 저장 — 다른 사람이 만든 플러그인을 덮어쓰지 않음
+  // 본인 프로필에 저장 (내 플러그인 + 설치 목록)
+  if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest){
+    SB.from('profiles').update({
+      user_plugins:userPlugins,
+      installed_plugins:[...installedSet]
+    }).eq('id',CU.id).then(()=>{},()=>{});
+  }
+  // 학급 공유 스토어에 merge — 본인 플러그인을 author_uid로 식별
   if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest&&CP?.class_id){
     SB.from('classes').select('settings').eq('id',CP.class_id).maybeSingle().then(function(res){
       const cur=(res&&res.data&&res.data.settings)||{};
       const pool=Array.isArray(cur.userPlugins)?cur.userPlugins.slice():[];
-      // 본인이 만든 (id가 u_로 시작) 플러그인만 추출
-      const mine=userPlugins.filter(function(p){return String(p.id||'').startsWith('u_');});
-      // pool에서 본인 것 제거 후 본인 최신 버전 다시 추가 (다른 사람 거 보존)
-      const others=pool.filter(function(p){
-        // 본인 id가 아닌 모든 것 유지
-        return !mine.some(function(m){return String(m.id)===String(p.id);});
-      });
+      // 본인 플러그인 (author_uid 자동 부여)
+      const mine=userPlugins.map(p=>({...p,author_uid:CU.id,by:p.by||CP.name||'사용자'}));
+      // pool에서 본인 것 제거 (author_uid로 식별)
+      const others=pool.filter(p=>p.author_uid!==CU.id);
       const merged={...cur,userPlugins:[...others,...mine]};
-      // installedPlugins는 본인 것이라 그대로 덮어써도 OK (사용자별 분리는 profiles에)
       SB.from('classes').update({settings:merged}).eq('id',CP.class_id).then(function(){},function(){});
+      // 로컬 캐시도 갱신
+      classStorePlugins=merged.userPlugins;
       window._classSettings=Object.assign(window._classSettings||{},{userPlugins:merged.userPlugins});
     },function(){});
-  }
-  // profiles에도 항상 저장 (개인 동기화)
-  if(SB&&CU&&CP?.id!=='demo'&&!CP?._isGuest){
-    SB.from('profiles').update({
-      user_plugins:userPlugins.filter(p=>String(p.id||'').startsWith('u_')),
-      installed_plugins:[...installedSet]
-    }).eq('id',CU.id).then(()=>{},()=>{});
   }
 }
 
@@ -8460,7 +8458,12 @@ function deleteNPost(id){
   toast('삭제됨','i');
 }
 
-function getAllPlugins(){return [...PLUGIN_DEFS,...userPlugins];}
+function getAllPlugins(){
+  // 기본 플러그인 + 학급 스토어(다른 사람 포함) + 본인 플러그인 (본인 것 우선)
+  const mineIds=new Set(userPlugins.map(p=>String(p.id)));
+  const storeOthers=(classStorePlugins||[]).filter(p=>!mineIds.has(String(p.id)));
+  return [...PLUGIN_DEFS,...storeOthers,...userPlugins];
+}
 
 /* -- 스토어 렌더링 -- */
 function filterPlugins(v){
@@ -8621,12 +8624,14 @@ function pedSave(){
   if(pedEditId){
     const idx=userPlugins.findIndex(p=>String(p.id)===String(pedEditId));
     if(idx>=0){
-      userPlugins[idx]=Object.assign({},userPlugins[idx],{nm:nm,desc:desc||'사용자 플러그인',tag:tag,code:code});
+      userPlugins[idx]=Object.assign({},userPlugins[idx],{nm:nm,desc:desc||'사용자 플러그인',tag:tag,code:code,author_uid:CU?.id||userPlugins[idx].author_uid});
     }
     toast(nm+' 수정 완료!','s');
   } else {
-    const newP={id:'u_'+Date.now(),nm,desc:desc||'사용자 플러그인',tag,code,
-      by:CP.name||'사용자',stars:0,dl:0,_user:true};
+    // 전역 유니크 id (본인 uid 접미사로 충돌 방지)
+    const uidTag=(CU?.id||'anon').slice(0,6);
+    const newP={id:'u_'+Date.now()+'_'+uidTag,nm,desc:desc||'사용자 플러그인',tag,code,
+      by:CP.name||'사용자',stars:0,dl:0,_user:true,author_uid:CU?.id||null};
     userPlugins.push(newP);
     toast(`${nm} 스토어 등록 완료!`,'s');
   }

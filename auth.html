@@ -112,6 +112,65 @@ body::after{content:'';position:absolute;bottom:-100px;left:-80px;width:350px;he
 var SB_URL='https://puauncwwtbnsieulvhca.supabase.co';
 var SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB1YXVuY3d3dGJuc2lldWx2aGNhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQyMDczMTMsImV4cCI6MjA4OTc4MzMxM30._3a4pg-ot9FxYHAywpq1Ic1eV1iLrPKGFymZJAPfE1A';
 
+// Supabase SDK 로드 후 setSession 호출
+function loadSBandSetSession(token, refresh, redirect){
+  var urls=[
+    'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.7/dist/umd/supabase.min.js',
+    'https://unpkg.com/@supabase/supabase-js@2.39.7/dist/umd/supabase.min.js',
+  ];
+  var idx=0;
+  function tryLoad(){
+    if(idx>=urls.length){
+      // SDK 로드 실패 시 raw localStorage fallback
+      rawFallback(token, refresh, redirect);
+      return;
+    }
+    var s=document.createElement('script');
+    s.src=urls[idx++];
+    s.onerror=function(){tryLoad();};
+    s.onload=function(){
+      try{
+        var client=supabase.createClient(SB_URL,SB_KEY,{
+          auth:{persistSession:true,autoRefreshToken:false,detectSessionInUrl:false,storageKey:'cw_sb_session',storage:window.localStorage}
+        });
+        client.auth.setSession({access_token:token,refresh_token:refresh||''})
+          .then(function(res){
+            if(res.error){
+              console.warn('setSession 오류:',res.error.message);
+              rawFallback(token, refresh, redirect);
+            } else {
+              prog(88,'ClassWorld로 이동 중');
+              document.getElementById('badgeTxt').textContent='ClassWorld 로그인 완료';
+              setTimeout(function(){
+                done('ClassWorld에 로그인됐습니다 ✓','잠시 후 자동으로 이동합니다',redirect);
+              },350);
+            }
+          })
+          .catch(function(){rawFallback(token, refresh, redirect);});
+      }catch(e){rawFallback(token, refresh, redirect);}
+    };
+    document.head.appendChild(s);
+  }
+  tryLoad();
+}
+
+function rawFallback(token, refresh, redirect){
+  // SDK 없이 raw 저장 (폴백)
+  var sessObj={
+    access_token:token,
+    refresh_token:refresh||'',
+    token_type:'bearer',
+    expires_in:3600,
+    expires_at:Math.floor(Date.now()/1000)+3600
+  };
+  localStorage.setItem('cw_sb_session',JSON.stringify(sessObj));
+  prog(88,'ClassWorld로 이동 중');
+  document.getElementById('badgeTxt').textContent='ClassWorld 로그인 완료';
+  setTimeout(function(){
+    done('ClassWorld에 로그인됐습니다 ✓','잠시 후 자동으로 이동합니다',redirect);
+  },350);
+}
+
 function prog(pct,lbl){
   document.getElementById('pFill').style.width=pct+'%';
   document.getElementById('pPct').textContent=pct+'%';
@@ -155,29 +214,9 @@ function fail(msg,dest){
 
   setTimeout(function(){
     prog(55,'ClassWorld 세션 설정 중');
-
     setTimeout(function(){
       try{
-        // Supabase SDK 세션 형식으로 localStorage에 저장
-        // storageKey: 'cw_sb_session'
-        var sessObj={
-          access_token:token,
-          refresh_token:refresh||'',
-          token_type:'bearer',
-          expires_in:3600,
-          expires_at:Math.floor(Date.now()/1000)+3600
-        };
-        localStorage.setItem('cw_sb_session',JSON.stringify({
-          currentSession:sessObj,
-          expiresAt:sessObj.expires_at
-        }));
-
-        prog(88,'ClassWorld로 이동 중');
-        document.getElementById('badgeTxt').textContent='ClassWorld 로그인 완료';
-
-        setTimeout(function(){
-          done('ClassWorld에 로그인됐습니다 ✓','잠시 후 자동으로 이동합니다',redirect);
-        },350);
+        loadSBandSetSession(token, refresh, redirect);
       }catch(e){
         fail('오류: '+e.message,redirect);
       }

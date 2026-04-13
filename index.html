@@ -2399,27 +2399,20 @@ function initRealtimeSubscriptions(){
     }).subscribe();
   _realtimeChannels.push(shopCh);
 
-  // 5-b. classes.settings 실시간 (플러그인 스토어 공유)
-  if(CP.class_id){
-    const clsCh=SB.channel('class_settings_'+CP.class_id)
-      .on('postgres_changes',{event:'UPDATE',schema:'public',table:'classes',filter:'id=eq.'+CP.class_id},(payload)=>{
-        const s=payload.new?.settings;
-        if(!s)return;
-        // 플러그인 스토어 갱신
-        if(Array.isArray(s.userPlugins)){
-          classStorePlugins=s.userPlugins;
-          window._classSettings=Object.assign(window._classSettings||{},{userPlugins:s.userPlugins});
-          // 스토어 탭이 열려 있으면 즉시 재렌더
-          if(document.getElementById('pg-comm')?.classList.contains('on')){
-            const onTab=document.querySelector('#comm-tabs .admtab.on');
-            if(onTab&&onTab.getAttribute('onclick')?.includes("'store'")){
-              if(typeof renderStore==='function')renderStore(getAllPlugins());
-            }
-          }
+  // 5-b. plugins 테이블 실시간 (전역 플러그인 스토어 공유)
+  const pluginsCh=SB.channel('plugins_global')
+    .on('postgres_changes',{event:'*',schema:'public',table:'plugins'},()=>{
+      // 플러그인 변경 감지 → 전체 재로드 후 스토어 탭 재렌더
+      loadPluginsFromSB().then(()=>{
+        if(document.getElementById('pg-comm')?.classList.contains('on')){
+          const onTab=document.querySelector('#comm-tabs .admtab.on');
+          const oc=onTab?.getAttribute('onclick')||'';
+          if(oc.includes("'store'")&&typeof renderStore==='function')renderStore(getAllPlugins());
+          else if(oc.includes("'mine'")&&typeof renderMyPlugins==='function')renderMyPlugins();
         }
-      }).subscribe();
-    _realtimeChannels.push(clsCh);
-  }
+      });
+    }).subscribe();
+  _realtimeChannels.push(pluginsCh);
 
   // 6. board_posts 실시간 (학급 게시판)
   if(CP.class_id){
@@ -8131,51 +8124,40 @@ try{localStorage.removeItem('cw_user_plugins');localStorage.removeItem('cw_insta
 let classStorePlugins=[];
 
 async function loadPluginsFromSB(){
-  // 매 호출마다 초기화 — 계정 전환 시 이전 데이터 남지 않도록
   userPlugins=[];
   classStorePlugins=[];
   installedSet=new Set();
   if(!SB||!CU||CP?.id==='demo'||CP?._isGuest){console.warn('[loadPluginsFromSB] skip');return;}
-  console.log('[loadPluginsFromSB] 시작. class_id =',CP?.class_id);
+  console.log('%c[loadPluginsFromSB] 시작','color:#1d4ed8;font-weight:bold','| 내 uid =',CU?.id);
   try{
-    // 플러그인 유효성: 문법 오류도 그냥 로드만 해서 수정할 수 있게 (실행만 runPlugin에서 체크)
-    const validPlugin=(p)=>{
-      if(!p||typeof p!=='object')return false;
-      if(!p.nm||typeof p.nm!=='string')return false;
-      return true;
-    };
-    // 1) 학급 스토어 (모든 사람의 플러그인)
-    if(CP?.class_id){
-      try{
-        const{data,error}=await SB.from('classes').select('settings').eq('id',CP.class_id).maybeSingle();
-        if(error){console.error('[loadPluginsFromSB classes error]',error);}
-        console.log('[loadPluginsFromSB] classes.settings.userPlugins =',data?.settings?.userPlugins?.length||0,'개');
-        if(data?.settings?.userPlugins&&Array.isArray(data.settings.userPlugins)){
-          classStorePlugins=data.settings.userPlugins.filter(validPlugin);
-          console.log('[loadPluginsFromSB] 필터 후 classStorePlugins =',classStorePlugins.length,'개');
-        } else {
-          classStorePlugins=[];
-        }
-      }catch(e){console.error('[loadPluginsFromSB classes catch]',e);classStorePlugins=[];}
-    }
-    // 2) 본인 profiles에서 내 것만
+    // 1) 전역 플러그인 스토어 (모든 학급 공유)
     try{
-      const{data:pf}=await SB.from('profiles').select('user_plugins,installed_plugins').eq('id',CU.id).maybeSingle();
-      if(pf){
-        if(Array.isArray(pf.user_plugins)){
-          userPlugins=pf.user_plugins.filter(validPlugin);
-        } else {
-          userPlugins=[];
-        }
-        if(Array.isArray(pf.installed_plugins)){
-          installedSet=new Set(pf.installed_plugins.map(String));
-        } else {
-          installedSet=new Set();
-        }
-      } else {
-        // 새 계정: 완전 초기화
-        userPlugins=[];
-        installedSet=new Set();
+      const{data,error}=await SB.from('plugins').select('*').order('updated_at',{ascending:false}).limit(500);
+      if(error){console.error('[loadPluginsFromSB plugins error]',error);}
+      if(Array.isArray(data)){
+        classStorePlugins=data.map(p=>({
+          id:p.id,
+          nm:p.nm,
+          desc:p.description||'',
+          tag:p.tag||'기타',
+          code:p.code||'',
+          author_uid:p.author_uid,
+          by:p.author_name||'익명',
+          stars:p.stars||0,
+          dl:p.dl||0,
+          _user:true
+        }));
+        console.log('%c[loadPluginsFromSB] 전역 스토어 로드','color:#16a34a','| 개수 =',classStorePlugins.length);
+      }
+    }catch(e){console.error('[loadPluginsFromSB plugins catch]',e);classStorePlugins=[];}
+    // 2) 본인 것 (classStorePlugins에서 필터)
+    userPlugins=classStorePlugins.filter(p=>p.author_uid===CU.id);
+    console.log('[loadPluginsFromSB] 내 플러그인 =',userPlugins.length,'개');
+    // 3) 본인 installed_plugins는 profiles에서 로드
+    try{
+      const{data:pf}=await SB.from('profiles').select('installed_plugins').eq('id',CU.id).maybeSingle();
+      if(pf&&Array.isArray(pf.installed_plugins)){
+        installedSet=new Set(pf.installed_plugins.map(String));
       }
     }catch(_){}
   }catch(e){console.error('[loadPluginsFromSB]',e);}
@@ -8183,50 +8165,47 @@ async function loadPluginsFromSB(){
 let pedEditId=null; // 편집 중인 플러그인 id
 
 async function savePluginStorage(){
-  if(!SB||!CU||CP?.id==='demo'||CP?._isGuest){console.warn('[savePluginStorage] skip: SB/CU 없음');return;}
-  console.log('[savePluginStorage] 시작. userPlugins.length =',userPlugins.length,', class_id =',CP?.class_id);
-  // 1) 본인 프로필에 저장
+  if(!SB||!CU||CP?.id==='demo'||CP?._isGuest){console.warn('[savePluginStorage] skip');return;}
+  console.log('%c[savePluginStorage] 시작','color:#1d4ed8;font-weight:bold','| userPlugins =',userPlugins.length);
+  // 1) 본인 installed_plugins만 profiles에 저장
   try{
-    const{data:pfData,error:e1}=await SB.from('profiles').update({
-      user_plugins:userPlugins,
+    const{error:e1}=await SB.from('profiles').update({
       installed_plugins:[...installedSet]
-    }).eq('id',CU.id).select('user_plugins');
-    if(e1){console.error('[savePluginStorage profiles error]',e1);toast('플러그인 저장 실패: '+e1.message,'e');}
-    else console.log('[savePluginStorage] profiles OK. 저장된 개수 =',pfData?.[0]?.user_plugins?.length);
-  }catch(e){console.error('[savePluginStorage profiles catch]',e);toast('플러그인 저장 실패','e');}
-  // 2) 학급 공유 스토어에 merge
-  if(CP?.class_id){
-    try{
-      // fetch
-      const{data:res,error:eFetch}=await SB.from('classes').select('settings').eq('id',CP.class_id).maybeSingle();
-      if(eFetch){console.error('[savePluginStorage fetch]',eFetch);toast('학급 설정 읽기 실패: '+eFetch.message,'e');return;}
-      const cur=res?.settings||{};
-      const pool=Array.isArray(cur.userPlugins)?cur.userPlugins.slice():[];
-      console.log('[savePluginStorage] 현재 pool.length =',pool.length);
-      // merge
-      const mine=userPlugins.map(p=>({...p,author_uid:CU.id,by:p.by||CP.name||'사용자'}));
-      const others=pool.filter(p=>p.author_uid!==CU.id);
-      const mergedPool=[...others,...mine];
-      const merged={...cur,userPlugins:mergedPool};
-      console.log('[savePluginStorage] merge 완료. mergedPool.length =',mergedPool.length,'(내 것:',mine.length,'/ 남의 것:',others.length,')');
-      // update + select로 실제 반영 검증
-      const{data:updData,error:eUpd}=await SB.from('classes').update({settings:merged}).eq('id',CP.class_id).select('settings');
-      if(eUpd){console.error('[savePluginStorage update]',eUpd);toast('학급 스토어 공유 실패: '+eUpd.message,'e');return;}
-      if(!updData||!updData.length){
-        console.error('[savePluginStorage] UPDATE 성공했지만 반환된 row 없음 — RLS 문제 가능성');
-        toast('학급 스토어 업데이트 권한 없음 (RLS)','e');
-        return;
+    }).eq('id',CU.id);
+    if(e1)console.error('[savePluginStorage profiles]',e1);
+  }catch(e){console.error('[savePluginStorage profiles catch]',e);}
+  // 2) 본인 플러그인을 전역 plugins 테이블에 upsert
+  try{
+    if(userPlugins.length){
+      const rows=userPlugins.map(p=>({
+        id:String(p.id),
+        nm:p.nm||'플러그인',
+        description:p.desc||'',
+        tag:p.tag||'기타',
+        code:p.code||'',
+        author_uid:CU.id,
+        author_name:CP?.name||'사용자',
+        stars:p.stars||0,
+        dl:p.dl||0,
+        updated_at:new Date().toISOString()
+      }));
+      const{data:upd,error:eUp}=await SB.from('plugins').upsert(rows,{onConflict:'id'}).select('id');
+      if(eUp){console.error('[savePluginStorage plugins upsert]',eUp);toast('스토어 공유 실패: '+eUp.message,'e');return;}
+      console.log('%c[savePluginStorage] upsert 완료','color:#16a34a','|',upd?.length||0,'개');
+    }
+    // 3) 서버에 있지만 내 로컬 userPlugins에 없는 것 → 삭제 (내가 지운 것)
+    const{data:myRemote}=await SB.from('plugins').select('id').eq('author_uid',CU.id);
+    if(Array.isArray(myRemote)){
+      const localIds=new Set(userPlugins.map(p=>String(p.id)));
+      const toDelete=myRemote.filter(r=>!localIds.has(String(r.id))).map(r=>r.id);
+      if(toDelete.length){
+        const{error:eDel}=await SB.from('plugins').delete().in('id',toDelete);
+        if(eDel)console.error('[savePluginStorage plugins delete]',eDel);
+        else console.log('[savePluginStorage] 삭제됨',toDelete.length,'개');
       }
-      const savedPool=updData[0]?.settings?.userPlugins||[];
-      console.log('[savePluginStorage] DB 반영 확인. savedPool.length =',savedPool.length);
-      // 로컬 캐시 즉시 동기화
-      classStorePlugins=savedPool;
-      window._classSettings=Object.assign(window._classSettings||{},{userPlugins:savedPool});
-      toast('✅ 학급 스토어에 공유됨 ('+mergedPool.length+'개)','s');
-    }catch(e){console.error('[savePluginStorage classes catch]',e);toast('학급 스토어 저장 실패: '+(e.message||e),'e');}
-  } else {
-    console.warn('[savePluginStorage] class_id 없음 — 학급 공유 스킵');
-  }
+    }
+    toast('✅ 스토어에 공유됨','s');
+  }catch(e){console.error('[savePluginStorage plugins catch]',e);toast('저장 실패','e');}
 }
 
 /* -- 커뮤니티 탭 -- */

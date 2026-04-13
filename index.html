@@ -2766,14 +2766,14 @@ function loadStaff(){
     {id:'announce',     l:'공지 작성',     ic:'📢', c:'#9333ea', d:'학급 전체에 공지를 보내요',       go:"openStaffNotice()"},
     {id:'reward',       l:'코인 지급',     ic:'💰', c:'#16a34a', d:'학생에게 코인을 지급해요',         go:"openStaffGive('reward')"},
     {id:'deduct',       l:'코인 차감',     ic:'💸', c:'#dc2626', d:'학생에게서 코인을 회수해요',       go:"openStaffGive('deduct')"},
-    {id:'quest_approve',l:'퀘스트 승인',   ic:'✅', c:'#0891b2', d:'학생 퀘스트 완료를 승인해요',     go:"goPage('pg-quests')"},
+    {id:'quest_approve',l:'퀘스트 승인',   ic:'✅', c:'#0891b2', d:'학생 퀘스트 완료를 승인해요',     go:"openStaffQuestApproval()"},
     {id:'ban',          l:'학생 정지',     ic:'🚫', c:'#ea580c', d:'규칙 위반 학생을 정지해요',       go:"openStaffBan()"},
-    {id:'loan_approve', l:'대출 승인',     ic:'🏦', c:'#0d9488', d:'학생 대출 신청을 검토해요',       go:"goPage('pg-econ')"},
-    {id:'credit_view',  l:'신용 조회',     ic:'📊', c:'#7c3aed', d:'학생 신용 점수를 확인해요',       go:"goPage('pg-credit')"},
+    {id:'loan_approve', l:'대출 승인',     ic:'🏦', c:'#0d9488', d:'학생 대출 신청을 검토해요',       go:"openStaffLoanApproval()"},
+    {id:'credit_view',  l:'신용 조회',     ic:'📊', c:'#7c3aed', d:'학생 신용 점수를 확인해요',       go:"openStaffCreditView()"},
     {id:'class_info',   l:'학급 정보',     ic:'📋', c:'#0369a1', d:'학급 학생 명단을 확인해요',       go:"openStaffClassInfo()"},
-    {id:'auction',      l:'경매 진행',     ic:'🔨', c:'#b45309', d:'학급 경매를 진행해요',           go:"goPage('pg-shop');setTimeout(()=>shopTab('market',null),50)"},
+    {id:'auction',      l:'경매 진행',     ic:'🔨', c:'#b45309', d:'학급 경매를 진행해요',           go:"openStaffAuction()"},
     {id:'market',       l:'중고 중재',     ic:'🤝', c:'#059669', d:'중고 거래를 중재해요',           go:"goPage('pg-shop');setTimeout(()=>shopTab('market',null),50)"},
-    {id:'seat_manage',  l:'자리 배치',     ic:'💺', c:'#be185d', d:'학급 좌석을 배치해요',           go:"goPage('pg-admin');setTimeout(()=>admTab('seating',null),50)"},
+    {id:'seat_manage',  l:'자리 배치',     ic:'💺', c:'#be185d', d:'학급 좌석을 배치해요',           go:"openStaffSeating()"},
   ];
   const myActions=STAFF_ACTIONS.filter(a=>has(a.id,a.l));
   el.innerHTML=`
@@ -2866,12 +2866,141 @@ async function openStaffClassInfo(){
   alert(`📋 학급 학생 ${stus.length}명 / 총자산 ${total.toLocaleString()} CC\n\n${txt}`);
 }
 
+/* === 직원 권한 전용 모달 시스템 === */
+function openStaffModal(title,bodyHtml,onMount){
+  const id='md-staff-action';
+  let el=document.getElementById(id);
+  if(el)el.remove();
+  document.body.insertAdjacentHTML('beforeend',`
+  <div class="ov" id="${id}">
+    <div class="modal" style="width:min(720px,96vw);max-height:90vh;overflow-y:auto">
+      <div class="mhdr">
+        <div class="mtitle">${escHtml(title)}</div>
+        <button class="mclose" onclick="closeMod('${id}')"><svg viewBox="0 0 9 9" fill="none" width="9" height="9"><path d="M1 1l7 7M8 1L1 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
+      </div>
+      <div id="staff-modal-body" style="padding:4px 2px">${bodyHtml}</div>
+    </div>
+  </div>`);
+  openMod(id);
+  if(typeof onMount==='function')setTimeout(()=>onMount(document.getElementById('staff-modal-body')),30);
+}
+
+async function openStaffSeating(){
+  if(!hasJobPerm('seat_manage')){toast('💼 "자리 배치" 권한이 없어요','e');return;}
+  openStaffModal('💺 자리 배치','<div id="staff-seating-host"></div>',function(){
+    const host=document.getElementById('staff-seating-host');
+    if(host&&typeof renderSeatingTab==='function'){
+      try{renderSeatingTab(host);}catch(e){host.innerHTML='<div class="empty"><div class="empty-t">자리 배치 화면을 불러올 수 없어요</div></div>';}
+    }
+  });
+}
+
+async function openStaffQuestApproval(){
+  if(!hasJobPerm('quest_approve')){toast('💼 "퀘스트 승인" 권한이 없어요','e');return;}
+  if(!SB||!CP?.class_id){toast('학급 정보가 없어요','e');return;}
+  const{data}=await SB.from('quest_completions')
+    .select('id,quest_id,user_id,status,created_at')
+    .eq('status','pending').order('created_at',{ascending:false}).limit(50);
+  const pendings=data||[];
+  if(!pendings.length){
+    openStaffModal('✅ 퀘스트 승인','<div class="empty" style="padding:40px"><div class="empty-t">대기 중인 퀘스트가 없어요</div></div>');
+    return;
+  }
+  // 학생 이름 가져오기
+  const uids=[...new Set(pendings.map(p=>p.user_id))];
+  let nameMap={};
+  try{
+    const{data:pf}=await SB.from('profiles').select('id,name').in('id',uids);
+    if(pf)pf.forEach(p=>{nameMap[p.id]=p.name;});
+  }catch(_){}
+  const html=pendings.map(p=>`
+    <div style="display:flex;align-items:center;gap:10px;background:#fff;border:1.5px solid #e2e8f0;border-radius:12px;padding:12px;margin-bottom:8px">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:800">${escHtml(nameMap[p.user_id]||'학생')}</div>
+        <div style="font-size:11px;color:#64748b;margin-top:2px">퀘스트 #${escHtml(String(p.quest_id))}</div>
+      </div>
+      <button class="btn btn-p btn-xs" onclick="staffApproveQuest('${escHtml(p.id)}','${escHtml(p.user_id)}','${escHtml(p.quest_id)}')">승인</button>
+      <button class="btn btn-r btn-xs" onclick="staffRejectQuest('${escHtml(p.id)}')">거절</button>
+    </div>`).join('');
+  openStaffModal('✅ 퀘스트 승인',`<div style="max-height:60vh;overflow-y:auto">${html}</div>`);
+}
+async function staffApproveQuest(id,uid,qid){
+  if(!hasJobPerm('quest_approve'))return;
+  await SB.from('quest_completions').update({status:'approved',approved_by:CU?.id}).eq('id',id);
+  toast('✅ 승인 완료','s');
+  closeMod('md-staff-action');setTimeout(openStaffQuestApproval,200);
+}
+async function staffRejectQuest(id){
+  if(!hasJobPerm('quest_approve'))return;
+  await SB.from('quest_completions').update({status:'rejected'}).eq('id',id);
+  toast('거절됨','i');
+  closeMod('md-staff-action');setTimeout(openStaffQuestApproval,200);
+}
+
+async function openStaffLoanApproval(){
+  if(!hasJobPerm('loan_approve')){toast('💼 "대출 승인" 권한이 없어요','e');return;}
+  if(!SB||!CP?.class_id)return;
+  const{data}=await SB.from('loans').select('id,borrower_id,amount,interest,is_repaid,due_date,created_at')
+    .eq('class_id',CP.class_id).eq('is_repaid',false).order('created_at',{ascending:false}).limit(50);
+  const loans=data||[];
+  let nameMap={};
+  if(loans.length){
+    const uids=[...new Set(loans.map(l=>l.borrower_id))];
+    try{const{data:pf}=await SB.from('profiles').select('id,name').in('id',uids);if(pf)pf.forEach(p=>{nameMap[p.id]=p.name;});}catch(_){}
+  }
+  const html=loans.length?loans.map(l=>`
+    <div style="background:#fff;border:1.5px solid #e2e8f0;border-radius:12px;padding:12px;margin-bottom:8px">
+      <div style="font-size:13px;font-weight:800">${escHtml(nameMap[l.borrower_id]||'학생')}</div>
+      <div style="font-size:12px;color:#64748b;margin-top:3px">대출액 ${(l.amount||0).toLocaleString()} CC · 이자 ${l.interest}% · 만기 ${l.due_date||'-'}</div>
+    </div>`).join(''):'<div class="empty" style="padding:40px"><div class="empty-t">진행 중인 대출이 없어요</div></div>';
+  openStaffModal('🏦 대출 현황',`<div style="max-height:60vh;overflow-y:auto">${html}</div>`);
+}
+
+async function openStaffCreditView(){
+  if(!hasJobPerm('credit_view')){toast('💼 "신용 조회" 권한이 없어요','e');return;}
+  if(!_dstuLoaded&&typeof loadDSTU==='function')await loadDSTU();
+  const stus=DSTU.filter(s=>s.role==='student'||!s.role);
+  const html=stus.map(s=>`
+    <div style="display:flex;align-items:center;gap:10px;background:#fff;border:1.5px solid #e2e8f0;border-radius:12px;padding:11px 14px;margin-bottom:6px">
+      <div style="flex:1"><div style="font-size:13px;font-weight:800">${escHtml(s.nm)}</div><div style="font-size:11px;color:#64748b">잔액 ${(s.bal||0).toLocaleString()} CC</div></div>
+      <span style="padding:4px 10px;background:#eff6ff;color:#1d4ed8;border-radius:99px;font-size:12px;font-weight:800">${escHtml(s.gr||'B')}등급</span>
+    </div>`).join('');
+  openStaffModal('📊 신용 조회',`<div style="max-height:60vh;overflow-y:auto">${html}</div>`);
+}
+
+async function openStaffAuction(){
+  if(!hasJobPerm('auction')){toast('💼 "경매 진행" 권한이 없어요','e');return;}
+  openStaffModal('🔨 경매 진행',`
+    <div style="padding:20px;text-align:center">
+      <div style="font-size:48px;margin-bottom:12px">🔨</div>
+      <div style="font-size:14px;font-weight:800;margin-bottom:8px">경매 시작하기</div>
+      <div style="font-size:12px;color:#64748b;margin-bottom:16px">학급 전체에 경매 알림이 전송됩니다</div>
+      <button class="btn btn-p btn-sm" onclick="staffStartAuction()">경매 시작</button>
+    </div>`);
+}
+async function staffStartAuction(){
+  const item=prompt('경매 아이템 이름:','');
+  if(!item)return;
+  const start=parseInt(prompt('시작가 (CC):','100')||0);
+  if(!start||start<=0)return;
+  if(SB&&CP?.class_id&&CU){
+    await SB.from('notices').insert({class_id:CP.class_id,created_by:CU.id,title:'🔨 경매 시작!',content:`아이템: ${item} / 시작가: ${start} CC`,is_global:false});
+  }
+  toast('🔨 경매 알림 전송 완료!','s');
+  closeMod('md-staff-action');
+}
+
 function updateCoin(){syncCoin();}
 
 /* ===========================================
    ROUTING
 =========================================== */
 function goPage(id){
+  // 학생은 관리자 패널 직접 진입 차단 (직원 권한은 pg-staff에서)
+  if(id==='pg-admin'&&CP?.role==='student'){
+    toast('💼 관리자 패널은 선생님 전용이에요. 직원 권한 페이지를 이용하세요','i');
+    id='pg-staff';
+  }
   const isBoard=id==='pg-board';
   const isFullPage=['pg-quests'].includes(id);
   const cnt=document.getElementById('cnt');
